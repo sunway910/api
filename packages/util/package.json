@@ -1,0 +1,59 @@
+{
+  "name": "@cessnetwork/util",
+  "version": "0.0.9",
+  "description": "Utility functions for CESS SDK",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && tsc-alias",
+    "prepublishOnly": "npm run build",
+    "clean": "rimraf dist",
+    "prebuild": "npm run clean"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "keywords": [
+    "cess",
+    "blockchain",
+    "storage",
+    "substrate",
+    "web3",
+    "sdk",
+    "util"
+  ],
+  "author": "CESS Labs",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CESSProject/api.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CESSProject/api/issues"
+  },
+  "homepage": "https://github.com/CESSProject/api#readme",
+  "dependencies": {
+    "@bnb-chain/reed-solomon": "^1.1.4",
+    "@cessnetwork/types": "^0.0.13",
+    "@polkadot/keyring": "13.5.6",
+    "@polkadot/util": "13.5.6",
+    "@polkadot/util-crypto": "13.5.6",
+    "form-data": "^4.0.4",
+    "merkletreejs": "^0.3.10",
+    "ping": "^0.4.4"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/ping": "^0.4.4",
+    "rimraf": "^5.0.0",
+    "tsc-alias": "^1.8.2",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

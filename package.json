@@ -1,0 +1,38 @@
+{
+  "author": "CESS <tech@cess.network>",
+  "bugs": "https://github.com/CESSProject/api/issues",
+  "engines": {
+    "node": ">=18.14"
+  },
+  "homepage": "https://github.com/CESSProject/api#readme",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CESSProject/api.git"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "version": "16.4.6",
+  "versions": {
+    "git": "16.4.6",
+    "npm": "16.4.6"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\""
+  },
+  "dependencies": {
+    "@polkadot/api": "16.4.6",
+    "@polkadot/util": "13.5.6"
+  },
+  "devDependencies": {
+    "@polkadot/api": "16.4.6",
+    "@polkadot/util": "13.5.6"
+  },
+  "resolutions": {
+    "typescript": "^5.5.4"
+  }
+}

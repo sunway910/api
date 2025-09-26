@@ -1,0 +1,65 @@
+{
+  "name": "@cessnetwork/api",
+  "version": "1.1.0",
+  "description": "CESS Chain Interface Implementation in TypeScript",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && tsc-alias",
+    "test": "jest",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist/**/*",
+    "!dist/test/**/*",
+    "!dist/pallets/test/**/*",
+    "!dist/.env*"
+  ],
+  "keywords": [
+    "cess",
+    "blockchain",
+    "storage",
+    "substrate",
+    "web3",
+    "sdk",
+    "api"
+  ],
+  "author": "CESSNetwork",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/CESSNetwork/api",
+  "bugs": {
+    "url": "https://github.com/CESSNetwork/api/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CESSNetwork/api.git"
+  },
+  "dependencies": {
+    "@cessnetwork/types": "^0.0.13",
+    "@cessnetwork/util": "^0.0.9",
+    "@polkadot/api": "16.4.6",
+    "@polkadot/api-base": "16.4.6",
+    "@polkadot/keyring": "13.5.6",
+    "@polkadot/rpc-provider": "16.4.6",
+    "@polkadot/types": "16.4.6",
+    "@polkadot/types-codec": "16.4.6",
+    "@polkadot/util": "13.5.6",
+    "@polkadot/util-crypto": "13.5.6",
+    "formdata-node": "^6.0.3"
+  },
+  "devDependencies": {
+    "@polkadot/api": "16.4.6",
+    "@polkadot/types": "16.4.6",
+    "@polkadot/types-codec": "16.4.6",
+    "@polkadot/util": "13.5.6",
+    "@types/jest": "^29.5.12",
+    "dotenv": "^17.2.2",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "tsc-alias": "^1.8.16"
+  }
+}

@@ -1,0 +1,29 @@
+# Build artifacts
+dist/**/*.js.map
+dist/**/*.d.ts.map
+
+# Source files (since we're publishing the dist folder)
+src/
+
+# Configuration files
+tsconfig.json
+tsconfig.build.json
+
+# Testing
+**/*.test.*
+**/*.spec.*
+
+# Development
+node_modules/
+.nyc_output/
+coverage/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
