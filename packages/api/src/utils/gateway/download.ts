@@ -1,8 +1,8 @@
 import { DownloadOptions, FetchDataOptions, GatewayConfig, QueryDataOptions, UploadResponse } from "@cessnetwork/types";
 import fs from "fs";
 import path from "path";
-import { pipeline } from "stream/promises";
 import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 
 export interface ExtendedDownloadOptions extends DownloadOptions {
     savePath?: string; // Optional path to save the file
@@ -45,8 +45,10 @@ export const RETRIEVER_FETCHDATA_URL = "/cache-fetch";
 export async function downloadFile(
     config: GatewayConfig,
     options: ExtendedDownloadOptions,
+    onProgress?: (downloaded: number, total: number) => void
 ): Promise<DownloadResult> {
     const baseUrl = config.baseUrl.replace(/\/$/, "");
+
     try {
         let url: string;
         if (options.segmentHash) {
@@ -77,26 +79,17 @@ export async function downloadFile(
 
         // Check if request was successful
         if (!response.ok) {
-            // Try to parse error response
-            try {
-                const errorData = await response.json();
-                return {
-                    success: false,
-                    status: response.status,
-                    error: `HTTP ${response.status}: ${response.statusText}`,
-                };
-            } catch {
-                return {
-                    success: false,
-                    status: response.status,
-                    error: `HTTP ${response.status}: ${response.statusText}`,
-                };
-            }
+            return {
+                success: false,
+                status: response.status,
+                error: `HTTP ${response.status}: ${response.statusText}`,
+            };
         }
 
         const contentType = response.headers.get("content-type");
         const contentLength = response.headers.get("content-length");
         const contentRange = response.headers.get("content-range");
+        const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
         const isPartialContent = response.status === 206;
 
         // Extract filename from Content-Disposition header if available
@@ -109,35 +102,62 @@ export async function downloadFile(
             }
         }
 
-        // If savePath is provided, save to disk
+        // Determine whether to use progress tracking
+        const useProgressTracking = !!onProgress;
+
         if (options.savePath) {
-            const saveResult = await saveResponseToFile(response, options, serverFileName);
-            return {
-                success: true,
-                data: {
-                    contentType,
-                    contentLength,
-                    contentRange,
-                    isPartialContent,
-                    filePath: saveResult.filePath,
-                    fileName: saveResult.fileName,
-                    fileSize: saveResult.fileSize,
-                },
-            };
+            // Save to file
+            if (useProgressTracking) {
+                // Save with progress tracking
+                return await saveToFileWithProgress(
+                    response,
+                    options,
+                    serverFileName,
+                    totalSize,
+                    onProgress,
+                    {contentType, contentLength, contentRange, isPartialContent}
+                );
+            } else {
+                // Save without progress tracking
+                const saveResult = await saveResponseToFile(response, options, serverFileName);
+                return {
+                    success: true,
+                    data: {
+                        contentType,
+                        contentLength,
+                        contentRange,
+                        isPartialContent,
+                        filePath: saveResult.filePath,
+                        fileName: saveResult.fileName,
+                        fileSize: saveResult.fileSize,
+                    },
+                };
+            }
         } else {
-            // Return as ArrayBuffer for in-memory use
-            const data = await response.arrayBuffer();
-            return {
-                success: true,
-                data: {
-                    content: data,
-                    contentType,
-                    contentLength,
-                    contentRange,
-                    isPartialContent,
-                    fileSize: data.byteLength,
-                },
-            };
+            // Return as ArrayBuffer
+            if (useProgressTracking) {
+                // Read with progress tracking
+                return await readToBufferWithProgress(
+                    response,
+                    totalSize,
+                    onProgress,
+                    {contentType, contentLength, contentRange, isPartialContent}
+                );
+            } else {
+                // Read without progress tracking
+                const data = await response.arrayBuffer();
+                return {
+                    success: true,
+                    data: {
+                        content: data,
+                        contentType,
+                        contentLength,
+                        contentRange,
+                        isPartialContent,
+                        fileSize: data.byteLength,
+                    },
+                };
+            }
         }
     } catch (error) {
         return {
@@ -145,6 +165,113 @@ export async function downloadFile(
             error: error instanceof Error ? error.message : "Unknown error occurred",
         };
     }
+}
+
+// Helper function for saving to file with progress tracking
+async function saveToFileWithProgress(
+    response: Response,
+    options: ExtendedDownloadOptions,
+    serverFileName: string | undefined,
+    totalSize: number,
+    onProgress: (downloaded: number, total: number) => void,
+    responseHeaders: {
+        contentType: string | null;
+        contentLength: string | null;
+        contentRange: string | null;
+        isPartialContent: boolean;
+    }
+): Promise<DownloadResult> {
+    const {filePath, fileName} = await prepareSavePath(
+        options.savePath!,
+        options.fid,
+        responseHeaders.contentType,
+        options.createDirectories,
+        options.overwrite,
+        serverFileName
+    );
+
+    const readable = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
+    const writeStream = fs.createWriteStream(filePath);
+
+    let downloadedSize = 0;
+
+    // Track progress
+    readable.on('data', (chunk: Buffer) => {
+        downloadedSize += chunk.length;
+        if (totalSize > 0) {
+            onProgress(downloadedSize, totalSize);
+        }
+    });
+
+    await pipeline(readable, writeStream);
+
+    const stats = await fs.promises.stat(filePath);
+
+    return {
+        success: true,
+        data: {
+            contentType: responseHeaders.contentType,
+            contentLength: responseHeaders.contentLength,
+            contentRange: responseHeaders.contentRange,
+            isPartialContent: responseHeaders.isPartialContent,
+            filePath,
+            fileName,
+            fileSize: stats.size,
+        },
+    };
+}
+
+// Helper function for reading to buffer with progress tracking
+async function readToBufferWithProgress(
+    response: Response,
+    totalSize: number,
+    onProgress: (downloaded: number, total: number) => void,
+    responseHeaders: {
+        contentType: string | null;
+        contentLength: string | null;
+        contentRange: string | null;
+        isPartialContent: boolean;
+    }
+): Promise<DownloadResult> {
+    const chunks: Uint8Array[] = [];
+    const reader = response.body?.getReader();
+
+    if (!reader) {
+        throw new Error("Response body is not readable");
+    }
+
+    let downloadedSize = 0;
+
+    while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+
+        chunks.push(value);
+        downloadedSize += value.length;
+
+        if (totalSize > 0) {
+            onProgress(downloadedSize, totalSize);
+        }
+    }
+
+    const buffer = new Uint8Array(downloadedSize);
+    let offset = 0;
+    for (const chunk of chunks) {
+        buffer.set(chunk, offset);
+        offset += chunk.length;
+    }
+
+    return {
+        success: true,
+        data: {
+            content: buffer.buffer,
+            contentType: responseHeaders.contentType,
+            contentLength: responseHeaders.contentLength,
+            contentRange: responseHeaders.contentRange,
+            isPartialContent: responseHeaders.isPartialContent,
+            fileSize: downloadedSize,
+        },
+    };
 }
 
 /**
@@ -284,41 +411,6 @@ async function prepareSavePath(
 }
 
 /**
- * Download file with range request support (useful for resuming downloads)
- */
-export async function downloadFileRange(
-    config: GatewayConfig,
-    options: ExtendedDownloadOptions,
-    start: number,
-    end?: number
-): Promise<DownloadResult> {
-    const rangeOptions: ExtendedDownloadOptions = {
-        ...options,
-        range: {start, end},
-    };
-    return downloadFile(config, rangeOptions);
-}
-
-/**
- * Download encrypted file
- */
-export async function downloadEncryptedFile(
-    config: GatewayConfig,
-    options: ExtendedDownloadOptions,
-    encryptionData: {
-        capsule: string;
-        rkb: string;
-        pkx: string;
-    }
-): Promise<DownloadResult> {
-    const encryptedOptions: ExtendedDownloadOptions = {
-        ...options,
-        encryption: encryptionData,
-    };
-    return downloadFile(config, encryptedOptions);
-}
-
-/**
  * Fetch file metadata without downloading content
  */
 export async function getFileMetadata(
@@ -360,165 +452,6 @@ export async function getFileMetadata(
                 contentDisposition: response.headers.get("content-disposition"),
             },
         };
-    } catch (error) {
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error occurred",
-        };
-    }
-}
-
-/**
- * Download file with progress tracking and support for range requests
- */
-export async function downloadFileWithProgress(
-    config: GatewayConfig,
-    options: ExtendedDownloadOptions,
-    onProgress?: (downloaded: number, total: number) => void
-): Promise<DownloadResult> {
-    const baseUrl = config.baseUrl.replace(/\/$/, "");
-    try {
-        // Build URL path according to Gin routing
-        let url: string;
-        if (options.segmentHash) {
-            url = `${baseUrl}${GATEWAY_GETFILE_URL}/${options.fid}/${options.segmentHash}`;
-        } else {
-            url = `${baseUrl}${GATEWAY_GETFILE_URL}/${options.fid}`;
-        }
-
-        const headers: Record<string, string> = {};
-
-        // Add Range header if specified
-        if (options.range) {
-            const {start, end} = options.range;
-            headers["Range"] = `bytes=${start}-${end || ''}`;
-        }
-
-        // Add encryption headers if provided
-        if (options.encryption) {
-            headers["Capsule"] = options.encryption.capsule;
-            headers["Rkb"] = options.encryption.rkb;
-            headers["Pkx"] = options.encryption.pkx;
-        }
-
-        const response = await fetch(url, {
-            method: "GET",
-            headers,
-        });
-
-        if (!response.ok) {
-            try {
-                const errorData = await response.json();
-                return {
-                    success: false,
-                    status: response.status,
-                    error: `HTTP ${response.status}: ${response.statusText}`,
-                };
-            } catch {
-                return {
-                    success: false,
-                    status: response.status,
-                    error: `HTTP ${response.status}: ${response.statusText}`,
-                };
-            }
-        }
-
-        const contentType = response.headers.get("content-type");
-        const contentLength = response.headers.get("content-length");
-        const contentRange = response.headers.get("content-range");
-        const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
-        const isPartialContent = response.status === 206;
-
-        // Extract filename from Content-Disposition header if available
-        const contentDisposition = response.headers.get("content-disposition");
-        let serverFileName: string | undefined;
-        if (contentDisposition) {
-            const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-            if (filenameMatch) {
-                serverFileName = filenameMatch[1].replace(/['"]/g, '');
-            }
-        }
-
-        let downloadedSize = 0;
-
-        if (options.savePath) {
-            // Save to file with progress tracking
-            const {filePath, fileName} = await prepareSavePath(
-                options.savePath,
-                options.fid,
-                contentType,
-                options.createDirectories,
-                options.overwrite,
-                serverFileName
-            );
-
-            const readable = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
-            const writeStream = fs.createWriteStream(filePath);
-
-            // Track progress
-            readable.on('data', (chunk: Buffer) => {
-                downloadedSize += chunk.length;
-                if (onProgress && totalSize > 0) {
-                    onProgress(downloadedSize, totalSize);
-                }
-            });
-
-            await pipeline(readable, writeStream);
-
-            const stats = await fs.promises.stat(filePath);
-
-            return {
-                success: true,
-                data: {
-                    contentType,
-                    contentLength,
-                    contentRange,
-                    isPartialContent,
-                    filePath,
-                    fileName,
-                    fileSize: stats.size,
-                },
-            };
-        } else {
-            // Return as ArrayBuffer with progress tracking
-            const chunks: Uint8Array[] = [];
-            const reader = response.body?.getReader();
-
-            if (!reader) {
-                throw new Error("Response body is not readable");
-            }
-
-            while (true) {
-                const {done, value} = await reader.read();
-                if (done) break;
-
-                chunks.push(value);
-                downloadedSize += value.length;
-
-                if (onProgress && totalSize > 0) {
-                    onProgress(downloadedSize, totalSize);
-                }
-            }
-
-            const buffer = new Uint8Array(downloadedSize);
-            let offset = 0;
-            for (const chunk of chunks) {
-                buffer.set(chunk, offset);
-                offset += chunk.length;
-            }
-
-            return {
-                success: true,
-                data: {
-                    content: buffer.buffer,
-                    contentType,
-                    contentLength,
-                    contentRange,
-                    isPartialContent,
-                    fileSize: downloadedSize,
-                },
-            };
-        }
     } catch (error) {
         return {
             success: false,

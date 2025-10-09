@@ -1,9 +1,6 @@
-import { BatchUploadOptions, GatewayConfig, UploadOptions as BaseUploadOptions, UploadResponse } from "@cessnetwork/types";
-import fs, { ReadStream } from "fs";
-import path from "path";
-import { Blob, File, FormData } from 'formdata-node';
+import { GatewayConfig, UploadOptions, UploadResponse } from "@cessnetwork/types";
+import { ReadStream } from "fs";
 
-export type UploadOptions = Omit<BaseUploadOptions, "token">;
 
 type FileInput = string | Buffer | ReadStream;
 
@@ -11,20 +8,30 @@ type FileInput = string | Buffer | ReadStream;
 export const GATEWAY_UPLOADFILE_URL = "/gateway/upload/file";
 export const GATEWAY_BATCHUPLOAD_URL = "/gateway/upload/batch/file";
 export const GATEWAY_BATCHREQUEST_URL = "/gateway/upload/batch/request";
+export const DEFAULT_CHUNK_SIZE = 100 * 1024 * 1024; // 100MB
+export const MAX_CONCURRENT_UPLOADS = 4;
 
-async function readFileToBuffer(fileInput: FileInput): Promise<Buffer> {
-    if (typeof fileInput === 'string') {
-        return fs.promises.readFile(fileInput);
-    } else if (Buffer.isBuffer(fileInput)) {
-        return fileInput;
-    } else if (fileInput instanceof ReadStream) {
-        const chunks: Uint8Array[] = [];
-        for await (const chunk of fileInput) {
-            chunks.push(chunk);
-        }
-        return Buffer.concat(chunks);
-    } else {
-        throw new Error("Invalid file input type. Expected string (path), Buffer, or ReadStream.");
+export interface BatchFilesInfo {
+    fileName: string;
+    territory: string;
+    totalSize: number;
+    encrypt: boolean;
+    asyncUpload: boolean;
+    noTxProxy: boolean;
+}
+
+function verifyUploadConfig(config: GatewayConfig) {
+    if (!config?.token?.trim()) {
+        throw new Error("Token is required when uploading file to gateway: INVALID_TOKEN");
+    }
+    if (!config?.baseUrl?.trim()) {
+        throw new Error("Base URL is required: INVALID_BASE_URL");
+    }
+}
+
+function verifyUploadOptions(options: UploadOptions) {
+    if (!options?.territory?.trim()) {
+        throw new Error("Territory is required: INVALID_TERRITORY");
     }
 }
 
@@ -34,127 +41,259 @@ async function readFileToBuffer(fileInput: FileInput): Promise<Buffer> {
 export async function uploadFile(
     config: GatewayConfig,
     fileInput: FileInput,
-    options: UploadOptions,
-): Promise<UploadResponse> {
-    const baseUrl = config.baseUrl.replace(/\/$/, "");
-    try {
-        const formData = new FormData();
-
-        const fileBuffer = await readFileToBuffer(fileInput);
-        let fileName: string;
-        if (typeof fileInput === 'string') {
-            fileName = path.basename(fileInput);
-        } else {
-            fileName = options.filename || "file.dat";
-        }
-        const file = new File([fileBuffer], fileName);
-        formData.append("file", file, fileName);
-
-        // Add optional parameters
-        const params: Record<string, string | undefined> = {
-            territory: options.territory,
-            async: options.async ? "true" : undefined,
-            noProxy: options.noProxy ? "true" : undefined,
-            encrypt: options.encrypt ? "true" : undefined,
-            filename: options.filename,
-        };
-
-        for (const [key, value] of Object.entries(params)) {
-            if (value) {
-                formData.append(key, value);
-            }
-        }
-
-        const response = await fetch(`${baseUrl}${GATEWAY_UPLOADFILE_URL}`, {
-            method: "POST",
-            headers: {
-                "Token": config.token,
-            },
-            body: formData,
-        });
-        return await response.json() as unknown as UploadResponse;
-    } catch (error) {
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error occurred",
-        };
-    }
-}
-
-/**
- * Upload file content as ArrayBuffer or Blob
- */
-export async function uploadFileContent(
-    config: GatewayConfig,
-    content: ArrayBuffer | Buffer,
-    filename: string,
     options: UploadOptions
 ): Promise<UploadResponse> {
-    // Convert ArrayBuffer to Buffer if needed
-    const bufferContent = ArrayBuffer.isView(content) || content instanceof ArrayBuffer
-        ? Buffer.from(content as ArrayBuffer)
-        : content as Buffer;
-
-    return uploadFile(config, bufferContent, {...options, filename});
-}
-
-/**
- * Batch upload file chunks
- */
-export async function batchUploadFile(
-    config: GatewayConfig,
-    hash: string,
-    fileContent: Buffer,
-    options: BatchUploadOptions
-): Promise<UploadResponse> {
+    verifyUploadConfig(config);
+    verifyUploadOptions(options);
     const baseUrl = config.baseUrl.replace(/\/$/, "");
+    const timeout = config.timeout || 60000;
+
     try {
-        const chunk = fileContent.subarray(options.start, options.end);
-        const formData = new FormData();
+        const formData = await createFormData(fileInput, options);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-        formData.append("hash", hash);
-        formData.append("start", options.start.toString());
-        formData.append("end", options.end.toString());
-        formData.append("chunk", new Blob([chunk]), "chunk.dat");
+        try {
+            const response = await fetch(`${baseUrl}${GATEWAY_UPLOADFILE_URL}`, {
+                method: "POST",
+                headers: createHeaders(config.token),
+                body: formData,
+                signal: controller.signal,
+            });
 
-        const response = await fetch(`${baseUrl}${GATEWAY_BATCHUPLOAD_URL}`, {
-            method: "POST",
-            headers: {
-                "Token": `${config.token}`,
-            },
-            body: formData,
-        });
-        return await response.json() as unknown as UploadResponse;
+            clearTimeout(timeoutId);
+
+            // Handle HTTP errors
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => 'Unknown error');
+                throw new Error(
+                    `HTTP ${response.status}: ${response.statusText}. ${errorText}: HTTP_${response.status}`
+                );
+            }
+
+            // Parse response with proper error handling
+            return await parseResponse(response);
+
+        } finally {
+            clearTimeout(timeoutId);
+        }
+
     } catch (error) {
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error occurred",
-        };
+        throw new Error(`Failed to upload file: ${error}`);
     }
 }
 
 /**
- * Request batch upload session
+ * Request batch upload session - matches Go implementation
  */
-export async function batchUploadRequest(
+export async function requestBatchUpload(
     config: GatewayConfig,
-    hash: string,
+    territory: string,
+    filename: string,
     fileSize: number,
-): Promise<UploadResponse> {
+    encrypt: boolean = false,
+    asyncUpload: boolean = true,
+    noTxProxy: boolean = false
+): Promise<{ hash: string; error?: string }> {
     const baseUrl = config.baseUrl.replace(/\/$/, "");
+
+    const batchInfo: BatchFilesInfo = {
+        fileName: filename,
+        territory: territory,
+        totalSize: fileSize,
+        encrypt: encrypt,
+        asyncUpload: asyncUpload,
+        noTxProxy: noTxProxy,
+    };
+
     try {
         const response = await fetch(`${baseUrl}${GATEWAY_BATCHREQUEST_URL}`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "Token": `Bearer ${config.token}`,
+                "token": `Bearer ${config.token}`,
             },
-            body: JSON.stringify({
-                hash,
-                fileSize,
-            }),
+            body: JSON.stringify(batchInfo),
         });
-        return await response.json() as unknown as UploadResponse;
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json() as unknown as any;
+
+        return {hash: result.data};
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        return {hash: "", error: `Request batch upload error: ${errorMessage}`};
+    }
+}
+
+/**
+ * Upload a single chunk - matches Go implementation
+ */
+export async function batchUploadFile(
+    config: GatewayConfig,
+    hash: string,
+    fileBuffer: ArrayBuffer | Buffer,
+    start: number,
+    end: number
+): Promise<{ result: string; error?: string }> {
+    const baseUrl = config.baseUrl.replace(/\/$/, "");
+
+    // Validate byte range
+    if (start >= end || end <= 0 || start < 0) {
+        return {result: "", error: "Bad content bytes range"};
+    }
+
+    try {
+        // Extract chunk from buffer
+        const chunk = fileBuffer.slice(start, end);
+
+        if (chunk.byteLength !== (end - start)) {
+            return {result: "", error: "Invalid data length"};
+        }
+
+        // Create FormData with file part
+        const formData = new FormData();
+        const blob = new Blob([chunk]);
+        formData.append("file", blob, "part");
+
+        const response = await fetch(`${baseUrl}${GATEWAY_BATCHUPLOAD_URL}`, {
+            method: "POST",
+            headers: {
+                "token": `Bearer ${config.token}`,
+                "Range": `bytes=${start}-${end}`,
+                "hash": hash,
+            },
+            body: formData,
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+
+        const result = await response.json() as unknown as any;
+        return {result: String(result.data)};
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        return {result: "", error: `Batch upload file error: ${errorMessage}`};
+    }
+}
+
+/**
+ * Upload large file in chunks with parallel processing and progress tracking
+ */
+export async function uploadLargeFile(
+    config: GatewayConfig,
+    file: File | ArrayBuffer | Buffer,
+    territory: string,
+    filename?: string,
+    options: {
+        chunkSize?: number;
+        maxConcurrent?: number;
+        encrypt?: boolean;
+        asyncUpload?: boolean;
+        noTxProxy?: boolean;
+        onProgress?: (progress: { uploaded: number; total: number; percentage: number }) => void;
+    } = {}
+): Promise<UploadResponse> {
+    const {
+        chunkSize = DEFAULT_CHUNK_SIZE,
+        maxConcurrent = MAX_CONCURRENT_UPLOADS,
+        encrypt = false,
+        asyncUpload = true,
+        noTxProxy = false,
+        onProgress,
+    } = options;
+
+    try {
+        // Convert file to buffer
+        let fileBuffer: ArrayBuffer;
+        let actualFilename: string;
+
+        if (file instanceof File) {
+            fileBuffer = await file.arrayBuffer();
+            actualFilename = filename || file.name;
+        } else {
+            fileBuffer = file;
+            actualFilename = filename || "unknown";
+        }
+
+        const fileSize = fileBuffer.byteLength;
+
+        // Step 1: Request batch upload session
+        const sessionResult = await requestBatchUpload(
+            config,
+            territory,
+            actualFilename,
+            fileSize,
+            encrypt,
+            asyncUpload,
+            noTxProxy
+        );
+
+        if (sessionResult.error) {
+            return {
+                success: false,
+                error: sessionResult.error,
+            };
+        }
+
+        const hash = sessionResult.hash;
+        const totalChunks = Math.ceil(fileSize / chunkSize);
+        let uploadedBytes = 0;
+
+        // Step 2: Upload chunks with parallel processing
+        const chunks: Array<{ start: number; end: number; index: number }> = [];
+
+        for (let i = 0; i < totalChunks; i++) {
+            const start = i * chunkSize;
+            const end = Math.min(start + chunkSize, fileSize);
+            chunks.push({start, end, index: i});
+        }
+
+        // Process chunks in parallel with concurrency limit
+        const uploadChunk = async (chunk: { start: number; end: number; index: number }) => {
+            const result = await batchUploadFile(config, hash, fileBuffer, chunk.start, chunk.end);
+
+            if (result.error) {
+                throw new Error(`Chunk ${chunk.index} upload failed: ${result.error}`);
+            }
+
+            uploadedBytes += (chunk.end - chunk.start);
+
+            if (onProgress) {
+                onProgress({
+                    uploaded: uploadedBytes,
+                    total: fileSize,
+                    percentage: Math.round((uploadedBytes / fileSize) * 100),
+                });
+            }
+
+            return result;
+        };
+
+        // Process chunks with concurrency control
+        const results = [];
+        for (let i = 0; i < chunks.length; i += maxConcurrent) {
+            const batch = chunks.slice(i, i + maxConcurrent);
+            const batchPromises = batch.map(uploadChunk);
+            const batchResults = await Promise.all(batchPromises);
+            results.push(...batchResults);
+        }
+
+        return {
+            success: true,
+            data: {
+                message: "File uploaded successfully",
+                hash: hash,
+                totalChunks: totalChunks,
+                fileSize: fileSize,
+            },
+        };
+
     } catch (error) {
         return {
             success: false,
@@ -164,43 +303,222 @@ export async function batchUploadRequest(
 }
 
 /**
- * Upload large file in chunks
+ * Enhanced upload with retry mechanism
  */
-export async function uploadLargeFile(
+export async function uploadLargeFileWithRetry(
     config: GatewayConfig,
-    fileInput: FileInput,
-    hash: string,
-    chunkSize: number = 100 * 1024 * 1024 // 100M default chunk size
+    file: File | ArrayBuffer | Buffer,
+    territory: string,
+    filename?: string,
+    options: {
+        chunkSize?: number;
+        maxConcurrent?: number;
+        maxRetries?: number;
+        retryDelay?: number;
+        encrypt?: boolean;
+        asyncUpload?: boolean;
+        noTxProxy?: boolean;
+        onProgress?: (progress: { uploaded: number; total: number; percentage: number }) => void;
+        onRetry?: (chunkIndex: number, attempt: number) => void;
+    } = {}
 ): Promise<UploadResponse> {
-    try {
-        const fileBuffer = await readFileToBuffer(fileInput);
-        const fileSize = fileBuffer.length;
+    verifyUploadConfig(config);
 
-        const requestResult = await batchUploadRequest(config, hash, fileSize);
-        if (!requestResult.success) {
-            return requestResult;
-        }
+    const {maxRetries = 3, retryDelay = 1000, onRetry, ...uploadOptions} = options;
 
-        const totalChunks = Math.ceil(fileSize / chunkSize);
+    let lastError: Error | null = null;
 
-        for (let i = 0; i < totalChunks; i++) {
-            const start = i * chunkSize;
-            const end = Math.min(start + chunkSize, fileSize);
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            const result = await uploadLargeFile(config, file, territory, filename, uploadOptions);
 
-            const chunkResult = await batchUploadFile(config, hash, fileBuffer, {start, end});
-            if (!chunkResult.success) {
-                return chunkResult;
+            if (result.success) {
+                return result;
+            }
+
+            lastError = new Error(result.error || "Upload failed");
+
+            if (attempt < maxRetries) {
+                if (onRetry) {
+                    onRetry(-1, attempt + 1); // -1 indicates overall retry
+                }
+                await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
+            }
+
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error("Unknown error");
+
+            if (attempt < maxRetries) {
+                if (onRetry) {
+                    onRetry(-1, attempt + 1);
+                }
+                await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
             }
         }
+    }
 
+    return {
+        success: false,
+        error: `Upload failed after ${maxRetries + 1} attempts: ${lastError?.message || "Unknown error"}`,
+    };
+}
+
+async function createFormData(fileInput: FileInput, options: UploadOptions): Promise<FormData> {
+    const formData = new FormData();
+
+    // Add file to FormData
+    const {file, fileName} = await processFileInput(fileInput, options.filename);
+    formData.append("file", file, fileName);
+
+    // Add other parameters (similar to Go version)
+    const params: Record<string, string> = {
+        territory: options.territory,
+    };
+
+    // Add optional boolean parameters only if true
+    if (options.async) params.async = "true";
+    if (options.noProxy) params.noProxy = "true";
+    if (options.encrypt) params.encrypt = "true";
+
+    // Add filename if explicitly provided
+    if (options.filename) {
+        params.filename = options.filename;
+    }
+
+    // Append all parameters to FormData
+    Object.entries(params).forEach(([key, value]) => {
+        formData.append(key, value);
+    });
+
+    return formData;
+}
+
+/**
+ * Process different types of file input
+ */
+async function processFileInput(
+    fileInput: FileInput,
+    explicitFilename?: string
+): Promise<{ file: File | Blob; fileName: string }> {
+
+    if (fileInput instanceof File) {
         return {
-            success: true,
-            data: {message: "file uploaded successfully", totalChunks},
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error occurred",
+            file: fileInput,
+            fileName: explicitFilename || fileInput.name || generateDefaultFilename()
         };
     }
+
+    if (fileInput instanceof Blob) {
+        return {
+            file: fileInput,
+            fileName: explicitFilename || generateDefaultFilename()
+        };
+    }
+
+    if (typeof fileInput === 'string') {
+        // File path - need to read file (Node.js environment)
+        const fileBuffer = await readFileFromPath(fileInput);
+        const fileName = explicitFilename || extractFilenameFromPath(fileInput);
+        return {
+            file: new File([fileBuffer], fileName),
+            fileName
+        };
+    }
+
+    if (Buffer.isBuffer(fileInput)) {
+        const fileName = explicitFilename || generateDefaultFilename();
+        return {
+            file: new File([fileInput], fileName),
+            fileName
+        };
+    }
+
+    throw new Error("Unsupported file input type: INVALID_FILE_INPUT");
+}
+
+/**
+ * Read file from file path (Node.js environment)
+ */
+async function readFileFromPath(filePath: string): Promise<Buffer> {
+    try {
+        // Dynamic import to avoid issues in browser environment
+        const fs = await import('fs/promises');
+        return await fs.readFile(filePath);
+    } catch (error) {
+        throw new Error(
+            `Failed to read file from path: ${filePath}: FILE_READ_ERROR`
+        );
+    }
+}
+
+/**
+ * Extract filename from file path
+ */
+function extractFilenameFromPath(filePath: string): string {
+    try {
+        // Dynamic import for path module
+        const path = require('path');
+        return path.basename(filePath);
+    } catch {
+        // Fallback for browser environment
+        return filePath.split(/[/\\]/).pop() || generateDefaultFilename();
+    }
+}
+
+/**
+ * Generate default filename with timestamp
+ */
+function generateDefaultFilename(): string {
+    return `upload_${Date.now()}.bin`;
+}
+
+/**
+ * Create HTTP headers (following Go version pattern)
+ */
+function createHeaders(token: string): Record<string, string> {
+    return {
+        "Token": `Bearer ${token}`, // Matching Go version format
+    };
+}
+
+/**
+ * Parse response with proper error handling
+ */
+async function parseResponse(response: Response): Promise<UploadResponse> {
+    try {
+        const contentType = response.headers.get('content-type');
+
+        if (contentType?.includes('application/json')) {
+            const data = await response.json();
+            return data as UploadResponse;
+        } else {
+            // Handle non-JSON response
+            const text = await response.text();
+            return {
+                success: true,
+                data: text
+            };
+        }
+    } catch (error) {
+        throw new Error("Failed to parse response: PARSE_ERROR");
+    }
+}
+
+// Optional: Utility function for batch uploads with progress tracking
+export interface UploadProgress {
+    loaded: number;
+    total: number;
+    percentage: number;
+    file: string;
+}
+
+export async function uploadFileWithProgress(
+    config: GatewayConfig,
+    fileInput: FileInput,
+    options: UploadOptions,
+    onProgress?: (progress: UploadProgress) => void
+): Promise<UploadResponse> {
+    // Implementation would use XMLHttpRequest for progress tracking
+    // This is a placeholder showing the interface
+    return uploadFile(config, fileInput, options);
 }

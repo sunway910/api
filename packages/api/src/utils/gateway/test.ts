@@ -4,7 +4,7 @@ import * as console from "node:console";
 import { u8aToHex } from "@polkadot/util";
 import { createHash } from 'crypto';
 import { CESS } from "@/cess";
-import { downloadFile, ExtendedDownloadOptions, getToken, SDKError, uploadFile } from "@/utils";
+import { downloadFile, ExtendedDownloadOptions, GenGatewayAccessToken, SDKError, uploadFile } from "@/utils";
 import { safeSignUnixTime } from "@cessnetwork/util";
 
 function calculateSHA256Hash(data: string): Buffer {
@@ -106,7 +106,7 @@ async function main() {
         }
 
         // step4: get token from gateway
-        const token = await getToken("http://154.194.34.195:1306", {
+        const token = await GenGatewayAccessToken("http://154.194.34.195:1306", {
             account: accountAddress,
             message: sign_message,
             sign: u8aToHex(signature),
@@ -121,11 +121,11 @@ async function main() {
 
         let uploadResult = {} as any
         let fid = ""
-        uploadResult = await uploadFile(gatewayConfig, "./src/utils/gateway/a.txt", {territory: myTerritory});
+        uploadResult = await uploadFile(gatewayConfig, "./src/utils/gateway/c.txt", {territory: myTerritory});
 
         if (uploadResult.code == 200) {
             fid = uploadResult.data
-            console.log("fid: ", fid)
+            console.log("upload success with fid: ", fid)
         } else {
             throw new Error("Failed to upload file")
         }
