@@ -21,7 +21,7 @@ This section explains how to use all three CESS packages (`@cessnetwork/api`, `@
 ### Step 1: Initialize CESS Client
 
 ```typescript
-import { CESS, CESSConfig, downloadFile, ExtendedDownloadOptions, getToken, isKeyringReady, SDKError, uploadFile } from '@cessnetwork/api';
+import { CESS, CESSConfig, downloadFile, ExtendedDownloadOptions, GenGatewayAccessToken, isKeyringReady, SDKError, uploadFile } from '@cessnetwork/api';
 import { safeSignUnixTime, } from '@cessnetwork/util';
 import { GatewayConfig, OssAuthorityList, OssDetail, UploadResponse } from "@cessnetwork/types";
 import { u8aToHex } from "@polkadot/util";
@@ -124,7 +124,7 @@ try {
 ### Step 5: Obtain Gateway Token
 
 ```typescript
-const token = await getToken(gatewayUrl, {
+const token = await GenGatewayAccessToken(gatewayUrl, {
     account: cess.getSignatureAcc(),
     message: sign_message,
     sign: u8aToHex(signature), // Convert signature to hex format
