@@ -1,11 +1,10 @@
+import { CESS } from "@/cess";
 import { getMnemonic } from "@/test/config";
-import { FileMetadata, GatewayConfig, OssAuthorityList, OssDetail, StorageOrder, Territory } from "@cessnetwork/types";
-import * as console from "node:console";
+import { GenGatewayAccessToken, SDKError, upload } from "@/utils";
+import { GatewayConfig, OssAuthorityList, OssDetail, Territory } from "@cessnetwork/types";
+import { safeSignUnixTime } from "@cessnetwork/util";
 import { u8aToHex } from "@polkadot/util";
 import { createHash } from 'crypto';
-import { CESS } from "@/cess";
-import { downloadFile, ExtendedDownloadOptions, GenGatewayAccessToken, SDKError, uploadFile } from "@/utils";
-import { safeSignUnixTime } from "@cessnetwork/util";
 
 function calculateSHA256Hash(data: string): Buffer {
     const hash = createHash('sha256');
@@ -17,7 +16,7 @@ function calculateSHA256Hash(data: string): Buffer {
 async function main() {
     const config = {
         name: "CESS-Pre-MainNet",
-        rpcs: ["wss://pm-rpc.cess.network/ws/"],
+        rpcs: ["wss://pm-rpc.cess.network"],
         privateKey: getMnemonic(),
         ss58Format: 11330,
         enableEventListener: false,
@@ -44,6 +43,8 @@ async function main() {
         let territoryToken
         const myTerritory = "default"
         const territory = await cess.queryTerritory(accountAddress, myTerritory) as Territory;
+        const curBlockHeight = await cess.queryBlockNumberByHash()
+        console.log('Block Height:', curBlockHeight);
 
         if (!territory) {
             try {
@@ -70,6 +71,18 @@ async function main() {
             } catch (error) {
                 console.error('❌ Error during territory minting:', error);
             }
+        } else if (territory.deadline - curBlockHeight <= 100800) {
+            // 100800 block means 7 days
+            const renewalRes = await cess.renewalTerritory(myTerritory, 10)
+            console.log('renew territory successfully:', renewalRes.blockHash);
+        } else if (territory.state != "Active" || curBlockHeight >= territory.deadline) {
+            // data will be reset when re-activate territory
+            const reactivateRes = await cess.reactivateTerritory(myTerritory, 30)
+            console.log('reactivate territory successfully:', reactivateRes.blockHash);
+        } else if (territory.remainingSpace <= 1024 * 1024 * 1024) {
+            // remaining space <= 1GiB
+            const expandRes = await cess.expandingTerritory(myTerritory, 1)
+            console.log('expand territory successfully:', expandRes.blockHash);
         } else {
             console.log("territory exist: ", territory)
         }
@@ -77,7 +90,11 @@ async function main() {
         // step3: auth to gateway acc if not auth
 
         // get gateway acc
+        // step3: auth to gateway acc if not auth
+
+        // get gateway acc
         let gatewayAcc = ""
+        // get all oss acc
         const ossAccList = await cess.queryOssByAccountId() as unknown as OssDetail[]
         for (let i = 0; i < ossAccList.length; i++) {
             if (ossAccList[i].ossInfo.domain == gatewayUrl) {
@@ -121,41 +138,39 @@ async function main() {
 
         let uploadResult = {} as any
         let fid = ""
-        uploadResult = await uploadFile(gatewayConfig, "./src/utils/gateway/c.txt", {territory: myTerritory});
+        uploadResult = await upload(gatewayConfig, "d:/Downloads/Lark-win32_ia32-7.11.5-signed.exe", {
+            territory: myTerritory,
+            maxConcurrent: 1
+        });
+        // uploadResult = await upload(gatewayConfig, "./src/test/gateway/demo.txt", {territory: myTerritory});
+        fid = uploadResult.data
+        console.log("upload result: ", uploadResult)
 
-        if (uploadResult.code == 200) {
-            fid = uploadResult.data
-            console.log("upload success with fid: ", fid)
-        } else {
-            throw new Error("Failed to upload file")
-        }
-
-        // step6: download file from gateway
-        const downloadOptions: ExtendedDownloadOptions = {
-            fid: fid,
-            savePath: "./src/utils/gateway/b.txt",
-            overwrite: true,
-            createDirectories: true,
-        };
-        const downloadResult = await downloadFile(gatewayConfig, downloadOptions);
-        if (downloadResult.success) {
-            console.log("download result: ", downloadResult.data)
-        } else {
-            throw new Error("Failed to download file")
-        }
-        console.log("download result:", downloadResult)
-
-        // step7: query file
-        // If the return value is not null, it means that the data is being distributed to storage miners.
-        // otherwise it means that the data has been stored on the storage node
-        const dealMap = await cess.queryDealMap(fid) as unknown as StorageOrder
-        if (dealMap) {
-            console.log("storage order detail: ", dealMap)
-        } else {
-            console.log("data has been stored on storage node")
-            const fileMeta = await cess.queryFileByFid(fid) as unknown as FileMetadata
-            console.log("file meta data: ", fileMeta)
-        }
+        // // step6: download file from gateway
+        // const downloadOptions: ExtendedDownloadOptions = {
+        //     fid: fid,
+        //     savePath: "./src/test/gateway/download.txt",
+        //     overwrite: true,
+        //     createDirectories: true,
+        // };
+        // const downloadResult = await downloadFile(gatewayConfig, downloadOptions);
+        // if (downloadResult.success) {
+        //     console.log("download result: ", downloadResult.data)
+        // } else {
+        //     throw new Error("Failed to download file")
+        // }
+        //
+        // // step7: query file
+        // // If the return value is not null, it means that the data is being distributed to storage miners.
+        // // otherwise it means that the data has been stored on the storage node
+        // const dealMap = await cess.queryDealMap(fid) as unknown as StorageOrder
+        // if (dealMap) {
+        //     console.log("storage order detail: ", dealMap)
+        // } else {
+        //     console.log("data has been stored on storage node")
+        //     const fileMeta = await cess.queryFileByFid(fid) as unknown as FileMetadata
+        //     console.log("file meta data: ", fileMeta)
+        // }
 
 
     } catch (error) {
