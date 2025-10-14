@@ -6,6 +6,7 @@ import { verifyUploadConfig, verifyUploadOptions } from "@/utils";
 import { Blob } from 'buffer';
 import { sleep } from "@cessnetwork/util";
 
+// Define the allowed types for file input
 type FileInput = string | Buffer | ReadStream;
 
 // Gateway API endpoints
@@ -13,26 +14,30 @@ export const GATEWAY_UPLOAD_FILE_URL = "/gateway/upload/file"; // Simple upload
 export const GATEWAY_BATCH_UPLOAD_URL = "/gateway/upload/batch/file"; // Chunk upload
 export const GATEWAY_BATCH_REQUEST_URL = "/gateway/upload/batch/request"; // Initialize chunk upload request
 
+// Constants for upload configuration
 export const DEFAULT_CHUNK_SIZE = 100 * 1024 * 1024; // 100MB
 export const MAX_CONCURRENT_UPLOADS = 4;
 export const DEFAULT_FILE_SIZE_THRESHOLD = 100 * 1024 * 1024; // 100MB threshold for batch upload
 
+// Interface for batch file upload information
 export interface BatchFilesInfo {
-    file_name: string;
-    territory: string;
-    total_size: number;
-    encrypt: boolean;
-    async_upload: boolean;
-    no_tx_proxy: boolean;
+    file_name: string; // Name of the file to upload
+    territory: string; // Storage territory for the file
+    total_size: number; // Total size of the file in bytes
+    encrypt: boolean; // Whether to encrypt the file
+    async_upload: boolean; // Whether to perform asynchronous upload
+    no_tx_proxy: boolean; // Whether to skip transaction proxy
 }
 
+// Interface for tracking upload progress
 export interface UploadProgress {
-    loaded: number;
-    total: number;
-    percentage: number;
-    file: string;
+    loaded: number; // Number of bytes uploaded
+    total: number; // Total number of bytes to upload
+    percentage: number; // Upload progress percentage
+    file: string; // Name of the file being uploaded
 }
 
+// Extended upload options with additional configuration
 export interface UploadOptionsExtended extends UploadOptions {
     isBatchUpload?: boolean; // Force batch upload regardless of file size
     uploadFileWithProgress?: (progress: UploadProgress) => void; // Progress callback
@@ -46,6 +51,11 @@ export interface UploadOptionsExtended extends UploadOptions {
 /**
  * Unified upload method that handles both simple and batch uploads
  * Automatically switches to batch upload for files > 100MB or when isBatchUpload is true
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param fileInput - The file to upload (string path, Buffer, or ReadStream)
+ * @param options - Upload options with extended functionality
+ * @returns Promise containing the upload response with success status and data
  */
 export async function upload(
     config: GatewayConfig,
@@ -124,6 +134,10 @@ export async function upload(
 
 /**
  * Get file size from different input types
+ * 
+ * @param fileInput - The file input to get size for (string path, Buffer, or ReadStream)
+ * @returns Promise containing the file size in bytes
+ * @throws Error when file size cannot be determined (for ReadStream inputs)
  */
 async function getFileSize(fileInput: FileInput): Promise<number> {
     if (Buffer.isBuffer(fileInput)) {
@@ -145,6 +159,15 @@ async function getFileSize(fileInput: FileInput): Promise<number> {
 
 /**
  * Simple upload with retry mechanism and progress
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param fileInput - The file to upload (string path, Buffer, or ReadStream)
+ * @param options - Upload options
+ * @param maxRetries - Maximum number of retry attempts
+ * @param retryDelay - Delay between retries in milliseconds
+ * @param onProgress - Optional callback for upload progress tracking
+ * @param onRetry - Optional callback when a retry is initiated
+ * @returns Promise containing the upload response
  */
 async function uploadFileWithRetryMechanism(
     config: GatewayConfig,
@@ -181,6 +204,13 @@ async function uploadFileWithRetryMechanism(
 }
 /**
  * Simple file upload with progress support
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param fileInput - The file to upload (string path, Buffer, or ReadStream)
+ * @param options - Upload options
+ * @param onProgress - Optional callback for upload progress tracking
+ * @returns Promise containing the upload response
+ * @throws Error when upload fails
  */
 async function uploadFileSimple(
     config: GatewayConfig,
@@ -232,6 +262,15 @@ async function uploadFileSimple(
 
 /**
  * Request batch upload session - matches Go implementation
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param territory - Storage territory for the file
+ * @param filename - Name of the file to upload
+ * @param fileSize - Size of the file in bytes
+ * @param encrypt - Whether to encrypt the file (default: false)
+ * @param asyncUpload - Whether to perform asynchronous upload (default: true)
+ * @param noTxProxy - Whether to skip transaction proxy (default: false)
+ * @returns Promise containing the upload response with session information
  */
 async function requestBatchUpload(
     config: GatewayConfig,
@@ -276,6 +315,13 @@ async function requestBatchUpload(
 
 /**
  * Upload a single chunk - optimized for Node.js Buffer operations
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param hash - Upload session hash identifier
+ * @param fileBuffer - Buffer containing the file data
+ * @param start - Start byte index for the chunk
+ * @param end - End byte index for the chunk
+ * @returns Promise containing the upload response for the chunk
  */
 async function batchUploadFile(
     config: GatewayConfig,
@@ -325,6 +371,13 @@ async function batchUploadFile(
 
 /**
  * Upload large file in chunks with parallel processing and progress tracking
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param file - The file to upload (string path, Buffer, or ReadStream)
+ * @param territory - Storage territory for the file
+ * @param filename - Optional filename for the upload
+ * @param options - Optional parameters for chunk size, concurrency, encryption, etc.
+ * @returns Promise containing the upload response
  */
 async function uploadLargeFile(
     config: GatewayConfig,
@@ -442,6 +495,14 @@ async function uploadLargeFile(
     }
 }
 
+/**
+ * Prepare file buffer from different input types
+ * 
+ * @param file - The file to prepare (string path, Buffer, or ReadStream)
+ * @param filename - Optional filename for the upload
+ * @returns Promise containing the file buffer and actual filename
+ * @throws Error when file input type is unsupported
+ */
 async function prepareFileBuffer(
     file: FileInput,
     filename?: string
@@ -464,6 +525,16 @@ async function prepareFileBuffer(
     throw new Error("Unsupported file input type for batch upload");
 }
 
+/**
+ * Upload large file with retry mechanism
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param file - The file to upload (string path, Buffer, or ReadStream)
+ * @param territory - Storage territory for the file
+ * @param filename - Optional filename for the upload
+ * @param options - Optional parameters for retry, chunk size, concurrency, etc.
+ * @returns Promise containing the upload response
+ */
 async function uploadLargeFileWithRetry(
     config: GatewayConfig,
     file: FileInput,
@@ -507,6 +578,13 @@ async function uploadLargeFileWithRetry(
     };
 }
 
+/**
+ * Create FormData for file upload with appropriate metadata
+ * 
+ * @param fileInput - The file to upload (string path, Buffer, or ReadStream)
+ * @param options - Upload options including territory, encryption, etc.
+ * @returns Promise containing the FormData object
+ */
 async function createFormData(fileInput: FileInput, options: UploadOptions): Promise<FormData> {
     const formData = new FormData();
 
@@ -530,6 +608,14 @@ async function createFormData(fileInput: FileInput, options: UploadOptions): Pro
     return formData;
 }
 
+/**
+ * Process file input to convert to Blob format and determine filename
+ * 
+ * @param fileInput - The file to process (string path, Buffer, or ReadStream)
+ * @param explicitFilename - Optional explicit filename to use
+ * @returns Promise containing the Blob and filename
+ * @throws Error when file input type is unsupported
+ */
 async function processFileInput(
     fileInput: FileInput,
     explicitFilename?: string
@@ -554,6 +640,13 @@ async function processFileInput(
     throw new Error("Unsupported file input type: INVALID_FILE_INPUT");
 }
 
+/**
+ * Read file from path and return as Buffer
+ * 
+ * @param filePath - Path to the file to read
+ * @returns Promise containing the file as a Buffer
+ * @throws Error when file read fails
+ */
 async function readFileFromPath(filePath: string): Promise<Buffer> {
     try {
         return await readFile(filePath);
@@ -566,6 +659,9 @@ async function readFileFromPath(filePath: string): Promise<Buffer> {
 
 /**
  * Extract filename from file path
+ * 
+ * @param filePath - Path to extract filename from
+ * @returns The filename portion of the path
  */
 function extractFilenameFromPath(filePath: string): string {
     return basename(filePath);
@@ -573,6 +669,8 @@ function extractFilenameFromPath(filePath: string): string {
 
 /**
  * Generate default filename with timestamp
+ * 
+ * @returns A filename with timestamp in the format upload_{timestamp}.bin
  */
 function generateDefaultFilename(): string {
     return `upload_${Date.now()}.bin`;
@@ -580,6 +678,10 @@ function generateDefaultFilename(): string {
 
 /**
  * Create HTTP headers (following Go version pattern)
+ * 
+ * @param token - Authentication token for the request
+ * @returns Record containing the authorization header
+ * @throws Error when token is not provided
  */
 function createHeaders(token: string | undefined): Record<string, string> {
     if (!token) {
@@ -593,6 +695,10 @@ function createHeaders(token: string | undefined): Record<string, string> {
 
 /**
  * Parse response with proper error handling
+ * 
+ * @param response - The fetch response object
+ * @returns Promise containing the parsed response
+ * @throws Error when response parsing fails
  */
 async function parseResponse(response: Response): Promise<UploadResponse> {
     try {
@@ -613,6 +719,13 @@ async function parseResponse(response: Response): Promise<UploadResponse> {
     }
 }
 
+/**
+ * Determine filename from file input or explicit filename
+ * 
+ * @param fileInput - The file input to extract name from (string path, Buffer, or ReadStream)
+ * @param explicitFilename - Optional explicit filename to use
+ * @returns The determined filename
+ */
 async function determineFilename(fileInput: FileInput, explicitFilename?: string): Promise<string> {
     if (explicitFilename) {
         return explicitFilename;

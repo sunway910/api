@@ -5,31 +5,33 @@ import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import { verifyUploadConfig } from "@/utils";
 
+// Extended download options with additional configuration
 export interface ExtendedDownloadOptions extends DownloadOptions {
     savePath?: string; // Optional path to save the file
     createDirectories?: boolean; // Whether to create directories if they don't exist
     overwrite?: boolean; // Whether to overwrite existing files
     range?: {
-        start: number;
-        end?: number;
+        start: number; // Start byte for range request
+        end?: number;   // End byte for range request (optional)
     };
     encryption?: {
-        capsule: string;
-        rkb: string;
-        pkx: string;
+        capsule: string; // Encryption capsule
+        rkb: string;     // Re-encryption key bytes
+        pkx: string;     // Public key X
     };
 }
 
+// Interface for download result with extended data
 export interface DownloadResult extends UploadResponse {
     data?: {
-        content?: ArrayBuffer;
-        contentType?: string | null;
-        contentLength?: string | null;
-        contentRange?: string | null; // For range requests
-        filePath?: string; // Path where file was saved
-        fileName?: string; // Name of the saved file
-        fileSize?: number; // Size of the downloaded file
-        isPartialContent?: boolean; // Whether this is a partial download
+        content?: ArrayBuffer;        // The downloaded content as array buffer
+        contentType?: string | null;  // Content type of the downloaded file
+        contentLength?: string | null; // Length of the downloaded content
+        contentRange?: string | null;  // Range information for partial downloads
+        filePath?: string;            // Path where file was saved (if saved to disk)
+        fileName?: string;            // Name of the saved file
+        fileSize?: number;            // Size of the downloaded file in bytes
+        isPartialContent?: boolean;   // Whether this is a partial download (status 206)
     };
 }
 
@@ -40,6 +42,11 @@ export const RETRIEVER_FETCHDATA_URL = "/cache-fetch";
 
 /**
  * Download file from gateway with optional save to disk
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param options - Extended download options including FID, segment hash, save path, etc.
+ * @param onProgress - Optional callback for download progress tracking
+ * @returns Promise containing the download result with success status and data
  */
 export async function downloadFile(
     config: GatewayConfig,
@@ -162,7 +169,17 @@ export async function downloadFile(
     }
 }
 
-// Helper function for saving to file with progress tracking
+/**
+ * Helper function for saving response to file with progress tracking
+ * 
+ * @param response - The fetch response object containing the file data
+ * @param options - Extended download options
+ * @param serverFileName - Optional filename from server's Content-Disposition header
+ * @param totalSize - Total size of the download in bytes
+ * @param onProgress - Callback for progress tracking
+ * @param responseHeaders - Headers from the response (content-type, content-length, etc.)
+ * @returns Promise containing the download result
+ */
 async function saveToFileWithProgress(
     response: Response,
     options: ExtendedDownloadOptions,
@@ -216,7 +233,15 @@ async function saveToFileWithProgress(
     };
 }
 
-// Helper function for reading to buffer with progress tracking
+/**
+ * Helper function for reading response to buffer with progress tracking
+ * 
+ * @param response - The fetch response object containing the file data
+ * @param totalSize - Total size of the download in bytes
+ * @param onProgress - Callback for progress tracking
+ * @param responseHeaders - Headers from the response (content-type, content-length, etc.)
+ * @returns Promise containing the download result with the content as ArrayBuffer
+ */
 async function readToBufferWithProgress(
     response: Response,
     totalSize: number,
@@ -271,6 +296,11 @@ async function readToBufferWithProgress(
 
 /**
  * Save response stream to file
+ * 
+ * @param response - The fetch response object containing the file data
+ * @param options - Extended download options including save path
+ * @param serverFileName - Optional filename from server's Content-Disposition header
+ * @returns Promise containing file path, name and size information
  */
 async function saveResponseToFile(
     response: Response,
@@ -308,7 +338,12 @@ async function saveResponseToFile(
 }
 
 /**
- * Generate filename from fid and content type
+ * Generate filename from FID and content type
+ * 
+ * @param fid - File identifier to use in the filename
+ * @param contentType - MIME content type of the file
+ * @param serverFileName - Optional filename provided by the server
+ * @returns Generated filename with appropriate extension
  */
 function generateFileName(fid: string, contentType: string | null, serverFileName?: string): string {
     // Use server-provided filename if available
@@ -324,6 +359,9 @@ function generateFileName(fid: string, contentType: string | null, serverFileNam
 
 /**
  * Get file extension from content type
+ * 
+ * @param contentType - MIME content type string
+ * @returns File extension corresponding to the content type
  */
 function getExtensionFromContentType(contentType: string | null): string {
     if (!contentType) return '.bin';
@@ -362,6 +400,9 @@ function getExtensionFromContentType(contentType: string | null): string {
 
 /**
  * Check if file exists
+ * 
+ * @param filePath - Path to check for file existence
+ * @returns Promise resolving to true if file exists, false otherwise
  */
 async function fileExists(filePath: string): Promise<boolean> {
     try {
@@ -372,6 +413,18 @@ async function fileExists(filePath: string): Promise<boolean> {
     }
 }
 
+/**
+ * Prepare save path for downloaded file
+ * 
+ * @param savePath - The path where the file should be saved
+ * @param fid - File identifier to use in filename if needed
+ * @param contentType - Content type to determine file extension
+ * @param createDirectories - Whether to create directories if they don't exist
+ * @param overwrite - Whether to overwrite existing files
+ * @param serverFileName - Optional filename provided by the server
+ * @returns Promise containing the prepared file path and filename
+ * @throws Error if file already exists and overwrite is false
+ */
 async function prepareSavePath(
     savePath: string,
     fid: string,
@@ -407,6 +460,11 @@ async function prepareSavePath(
 
 /**
  * Fetch file metadata without downloading content
+ * Uses HTTP HEAD request to get file information
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param options - Download options including FID
+ * @returns Promise containing the metadata response with success status and data
  */
 export async function getFileMetadata(
     config: GatewayConfig,
@@ -460,6 +518,10 @@ export async function getFileMetadata(
 
 /**
  * Query data from retriever
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param options - Query options with hash parameter
+ * @returns Promise containing the query result with success status and data
  */
 export async function queryData(
     config: GatewayConfig,
@@ -496,6 +558,10 @@ export async function queryData(
 
 /**
  * Fetch data from cache
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param options - Fetch options with cache key
+ * @returns Promise containing the cached data with success status and data
  */
 export async function fetchCacheData(
     config: GatewayConfig,

@@ -3,8 +3,15 @@ import { Keyring } from "@polkadot/api";
 import { u8aConcat } from "@polkadot/util";
 import { blake2AsU8a, cryptoWaitReady, mnemonicValidate, randomAsU8a } from "@polkadot/util-crypto";
 
+// Gateway endpoint for generating access tokens
 export const GATEWAY_GENTOKEN_URL = "/gateway/gentoken"
 
+/**
+ * Verify gateway configuration has required fields
+ * 
+ * @param config - Gateway configuration to verify
+ * @throws Error if configuration is invalid
+ */
 export function verifyUploadConfig(config: GatewayConfig) {
     if (!config?.token?.trim()) {
         throw new Error("Token is required when uploading file to gateway: INVALID_TOKEN");
@@ -14,12 +21,26 @@ export function verifyUploadConfig(config: GatewayConfig) {
     }
 }
 
+/**
+ * Verify upload options have required fields
+ * 
+ * @param options - Upload options to verify
+ * @throws Error if options are invalid
+ */
 export function verifyUploadOptions(options: UploadOptions) {
     if (!options?.territory?.trim()) {
         throw new Error("Territory is required: INVALID_TERRITORY");
     }
 }
 
+/**
+ * Generate gateway access token using provided credentials
+ * 
+ * @param gatewayUrl - Base URL of the gateway service
+ * @param genTokenReq - Request object containing token generation parameters
+ * @returns Promise containing the generated access token
+ * @throws Error for network failures, timeouts, or invalid responses
+ */
 export async function GenGatewayAccessToken(gatewayUrl: string, genTokenReq: GenTokenReq): Promise<any> {
     try {
         // Remove trailing slash from gatewayUrl
@@ -222,6 +243,10 @@ async function genReKey(
  * Simulates scalar multiplication for elliptic curve operations
  * Note: This is a simplified implementation for demonstration
  * In production, you would use proper cryptographic libraries
+ * 
+ * @param scalar - Scalar value for multiplication
+ * @param point - Point on the elliptic curve
+ * @returns Uint8Array result of scalar multiplication
  */
 function performScalarMultiplication(scalar: Uint8Array, point: Uint8Array): Uint8Array {
     // Simplified simulation using blake2 hash
@@ -231,6 +256,9 @@ function performScalarMultiplication(scalar: Uint8Array, point: Uint8Array): Uin
 /**
  * Hash input data and convert to scalar representation
  * Uses Blake2b hash function as specified in Polkadot cryptography
+ * 
+ * @param input - Input data to hash
+ * @returns Uint8Array hash result as scalar
  */
 function hashAndConvertToScalar(input: Uint8Array): Uint8Array {
     // Use Blake2b hash (Polkadot's standard hashing algorithm)
@@ -240,6 +268,10 @@ function hashAndConvertToScalar(input: Uint8Array): Uint8Array {
 /**
  * Generate the final re-encryption key using scalar arithmetic
  * Simulates: rk = skA * d^(-1)
+ * 
+ * @param skA - Secret key A
+ * @param d - Scalar value
+ * @returns Uint8Array re-encryption key
  */
 function generateReEncryptionKey(skA: Uint8Array, d: Uint8Array): Uint8Array {
     // Simplified scalar arithmetic simulation
@@ -248,12 +280,14 @@ function generateReEncryptionKey(skA: Uint8Array, d: Uint8Array): Uint8Array {
     return blake2AsU8a(combined, 256);
 }
 
+// Interface for re-encryption key result
 export interface ReEncryptionKeyResult {
     reEncryptionKey: Uint8Array;  // Marshaled re-encryption key (rk)
     publicKeyX: Uint8Array;       // Encoded public key bytes for encryption (pkX)
 }
 
+// Interface for re-encryption key generation result
 export interface ReKeyGenerationResult {
-    rk: Uint8Array;
-    pkX: Uint8Array;
+    rk: Uint8Array;  // Re-encryption key
+    pkX: Uint8Array; // Public key X
 }
