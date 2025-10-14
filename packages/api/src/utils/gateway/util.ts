@@ -1,9 +1,24 @@
-import { GenTokenReq } from "@cessnetwork/types";
+import { GatewayConfig, GenTokenReq, UploadOptions } from "@cessnetwork/types";
 import { Keyring } from "@polkadot/api";
 import { u8aConcat } from "@polkadot/util";
 import { blake2AsU8a, cryptoWaitReady, mnemonicValidate, randomAsU8a } from "@polkadot/util-crypto";
 
 export const GATEWAY_GENTOKEN_URL = "/gateway/gentoken"
+
+export function verifyUploadConfig(config: GatewayConfig) {
+    if (!config?.token?.trim()) {
+        throw new Error("Token is required when uploading file to gateway: INVALID_TOKEN");
+    }
+    if (!config?.baseUrl?.trim()) {
+        throw new Error("Base URL is required: INVALID_BASE_URL");
+    }
+}
+
+export function verifyUploadOptions(options: UploadOptions) {
+    if (!options?.territory?.trim()) {
+        throw new Error("Territory is required: INVALID_TERRITORY");
+    }
+}
 
 export async function GenGatewayAccessToken(gatewayUrl: string, genTokenReq: GenTokenReq): Promise<any> {
     try {

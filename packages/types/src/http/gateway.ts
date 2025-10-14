@@ -7,21 +7,20 @@ export interface GenTokenReq extends signData{
 export interface UploadOptions {
     territory: string;
     filename?: string;
+    // enable async upload
     async?: boolean;
+    // create storage order by user instead of gateway
     noProxy?: boolean;
+    // encrypt file by gateway
     encrypt?: boolean;
 }
 
 // token is required for upload request
 export interface GatewayConfig {
     baseUrl: string;
+    // generate token by your private key
     token?: string;
     timeout?: number;
-}
-
-export interface BatchUploadOptions {
-    start: number;
-    end: number;
 }
 
 export interface UploadResponse {

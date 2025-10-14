@@ -1,7 +1,7 @@
 import { CESS } from "@/cess";
 import { getMnemonic } from "@/test/config";
-import { GenGatewayAccessToken, SDKError, upload } from "@/utils";
-import { GatewayConfig, OssAuthorityList, OssDetail, Territory } from "@cessnetwork/types";
+import { downloadFile, ExtendedDownloadOptions, GenGatewayAccessToken, SDKError, upload } from "@/utils";
+import { FileMetadata, GatewayConfig, OssAuthorityList, OssDetail, StorageOrder, Territory } from "@cessnetwork/types";
 import { safeSignUnixTime } from "@cessnetwork/util";
 import { u8aToHex } from "@polkadot/util";
 import { createHash } from 'crypto';
@@ -138,41 +138,40 @@ async function main() {
 
         let uploadResult = {} as any
         let fid = ""
-        uploadResult = await upload(gatewayConfig, "d:/Downloads/Lark-win32_ia32-7.11.5-signed.exe", {
+        uploadResult = await upload(gatewayConfig, "./src/test/gateway/demo.txt", {
             territory: myTerritory,
-            maxConcurrent: 1
+            uploadFileWithProgress: (progress) => {
+                console.log(`\rUpload progress: ${progress.percentage}% (${progress.loaded}/${progress.total} bytes) - ${progress.file}`);
+            }
         });
-        // uploadResult = await upload(gatewayConfig, "./src/test/gateway/demo.txt", {territory: myTerritory});
         fid = uploadResult.data
         console.log("upload result: ", uploadResult)
 
-        // // step6: download file from gateway
-        // const downloadOptions: ExtendedDownloadOptions = {
-        //     fid: fid,
-        //     savePath: "./src/test/gateway/download.txt",
-        //     overwrite: true,
-        //     createDirectories: true,
-        // };
-        // const downloadResult = await downloadFile(gatewayConfig, downloadOptions);
-        // if (downloadResult.success) {
-        //     console.log("download result: ", downloadResult.data)
-        // } else {
-        //     throw new Error("Failed to download file")
-        // }
-        //
-        // // step7: query file
-        // // If the return value is not null, it means that the data is being distributed to storage miners.
-        // // otherwise it means that the data has been stored on the storage node
-        // const dealMap = await cess.queryDealMap(fid) as unknown as StorageOrder
-        // if (dealMap) {
-        //     console.log("storage order detail: ", dealMap)
-        // } else {
-        //     console.log("data has been stored on storage node")
-        //     const fileMeta = await cess.queryFileByFid(fid) as unknown as FileMetadata
-        //     console.log("file meta data: ", fileMeta)
-        // }
+        // step6: download file from gateway
+        const downloadOptions: ExtendedDownloadOptions = {
+            fid: fid,
+            savePath: "./src/test/gateway/download.txt",
+            overwrite: true,
+            createDirectories: true,
+        };
+        const downloadResult = await downloadFile(gatewayConfig, downloadOptions);
+        if (downloadResult.success) {
+            console.log("download result: ", downloadResult.data)
+        } else {
+            throw new Error("Failed to download file")
+        }
 
-
+        // step7: query file
+        // If the return value is not null, it means that the data is being distributed to storage miners.
+        // otherwise it means that the data has been stored on the storage node
+        const dealMap = await cess.queryDealMap(fid) as unknown as StorageOrder
+        if (dealMap) {
+            console.log("storage order detail: ", dealMap)
+        } else {
+            console.log("data has been stored on storage node")
+            const fileMeta = await cess.queryFileByFid(fid) as unknown as FileMetadata
+            console.log("file meta data: ", fileMeta)
+        }
     } catch (error) {
 
     } finally {

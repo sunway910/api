@@ -3,17 +3,16 @@ import fs from "fs";
 import path from "path";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
+import { verifyUploadConfig } from "@/utils";
 
 export interface ExtendedDownloadOptions extends DownloadOptions {
     savePath?: string; // Optional path to save the file
     createDirectories?: boolean; // Whether to create directories if they don't exist
     overwrite?: boolean; // Whether to overwrite existing files
-    // Range request support
     range?: {
         start: number;
         end?: number;
     };
-    // Encryption support (matching server's capsule/rkb/pkx headers)
     encryption?: {
         capsule: string;
         rkb: string;
@@ -59,13 +58,11 @@ export async function downloadFile(
 
         const headers: Record<string, string> = {};
 
-        // Add Range header for partial downloads
         if (options.range) {
             const {start, end} = options.range;
             headers["Range"] = `bytes=${start}-${end || ''}`;
         }
 
-        // Add encryption headers if provided
         if (options.encryption) {
             headers["Capsule"] = options.encryption.capsule;
             headers["Rkb"] = options.encryption.rkb;
@@ -134,7 +131,6 @@ export async function downloadFile(
                 };
             }
         } else {
-            // Return as ArrayBuffer
             if (useProgressTracking) {
                 // Read with progress tracking
                 return await readToBufferWithProgress(
@@ -144,7 +140,6 @@ export async function downloadFile(
                     {contentType, contentLength, contentRange, isPartialContent}
                 );
             } else {
-                // Read without progress tracking
                 const data = await response.arrayBuffer();
                 return {
                     success: true,
@@ -483,7 +478,7 @@ export async function queryData(
         const response = await fetch(url, {
             method: "GET",
             headers: {
-                "Token": config.token,
+                "Token": config.token!,
             },
         });
         const result = await response.json();
@@ -508,6 +503,7 @@ export async function fetchCacheData(
 ): Promise<UploadResponse> {
     const baseUrl = config.baseUrl.replace(/\/$/, "");
     try {
+        verifyUploadConfig(config);
         const params = new URLSearchParams();
         params.append("cacheKey", options.cacheKey);
 
@@ -516,7 +512,7 @@ export async function fetchCacheData(
         const response = await fetch(url, {
             method: "GET",
             headers: {
-                "Token": config.token,
+                "Token": config.token!,
             },
         });
 
@@ -532,5 +528,3 @@ export async function fetchCacheData(
         };
     }
 }
-
-// Add batch download functions here if needed...
