@@ -4,14 +4,6 @@ import { downloadFile, ExtendedDownloadOptions, GenGatewayAccessToken, SDKError,
 import { FileMetadata, GatewayConfig, OssAuthorityList, OssDetail, StorageOrder, Territory } from "@cessnetwork/types";
 import { safeSignUnixTime } from "@cessnetwork/util";
 import { u8aToHex } from "@polkadot/util";
-import { createHash } from 'crypto';
-
-function calculateSHA256Hash(data: string): Buffer {
-    const hash = createHash('sha256');
-    hash.update(data);
-    return hash.digest();
-}
-
 
 async function main() {
     const config = {
@@ -44,7 +36,7 @@ async function main() {
         const myTerritory = "default"
         const territory = await cess.queryTerritory(accountAddress, myTerritory) as Territory;
         const curBlockHeight = await cess.queryBlockNumberByHash()
-        console.log('Block Height:', curBlockHeight);
+        console.log('Current Block Height:', curBlockHeight);
 
         if (!territory) {
             try {
@@ -88,19 +80,17 @@ async function main() {
         }
 
         // step3: auth to gateway acc if not auth
-
-        // get gateway acc
-        // step3: auth to gateway acc if not auth
-
-        // get gateway acc
         let gatewayAcc = ""
-        // get all oss acc
+        // get oss public acc by domain name
         const ossAccList = await cess.queryOssByAccountId() as unknown as OssDetail[]
         for (let i = 0; i < ossAccList.length; i++) {
             if (ossAccList[i].ossInfo.domain == gatewayUrl) {
                 gatewayAcc = ossAccList[i].account
                 break;
             }
+        }
+        if (!gatewayAcc) {
+            throw new Error("gateway not found")
         }
 
         // auth my territory to gateway acc

@@ -159,14 +159,6 @@ console.log(fileHash);
 - `formatTimestamp(timestamp: number): string` - Format timestamp to readable string
 - `getCurrentTimestamp(): number` - Get current timestamp
 
-### Error Handling
-- `handleError(error: any): CESSUtilError` - Standard error handling
-- `isCESSUtilError(error: any): boolean` - Check if error is a CESSUtilError
-
-### Logger
-- `createLogger(name: string): Logger` - Create a named logger
-- `setLogLevel(level: string): void` - Set global log level
-
 ## Gateway Utilities
 
 The utility functions play a critical role in gateway operations, particularly for authentication and communication with the CESS storage network.
@@ -178,8 +170,10 @@ When interacting with CESS gateways, you need specific utilities to sign message
 import { getWrappedMsg, safeSignUnixTime } from '@cessnetwork/util';
 
 // Example: Gateway authentication preparation
+// The signature and message are then used to obtain a token from the gateway
+// as demonstrated in the @cessnetwork/api gateway operations
 async function prepareGatewayAuthentication() {
-  const mnemonic = process.env.CESS_PRIVATE_KEY || 'your twelve word mnemonic phrase here';
+  const mnemonic = process.env.CESS_PRIVATE_KEY || 'your twelve word mnemonic phrase or private key here';
   
   // Step 1: Create a timestamp message to sign
   const sign_message = Date.now().toString();
@@ -193,9 +187,10 @@ async function prepareGatewayAuthentication() {
   console.log('Timestamp message:', sign_message);
   console.log('Wrapped message for signing:', wrappedMsg);
   console.log('Signature:', signature);
-  
-  // The signature and message are then used to obtain a token from the gateway
-  // as demonstrated in the @cessnetwork/api gateway operations
+ 
+  // create cess client and verify it
+  // const verifyRes = cess.keyring.verify(getWrappedMsg(sign_message), signature, cess.getPublicKey())
+  // console.log('verify result:', verifyRes);
 }
 
 prepareGatewayAuthentication();
@@ -203,7 +198,7 @@ prepareGatewayAuthentication();
 
 ## Documentation
 
-For more detailed documentation, please visit [CESS official documentation](https://doc.cess.network/developer/cess-sdk/javascript-sdk).
+For more detailed documentation, please visit [CESS official documentation](https://doc.cess.network/developer/cess-sdk/sdk-js).
 
 ## License
 
