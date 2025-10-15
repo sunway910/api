@@ -5,19 +5,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ApiPromise } from '@polkadot/api';
-import { IAudit } from "./chainer/IAudit";
-import { IBalances } from "./chainer/IBalances";
-import { IOss } from "./chainer/IOss";
-import { IFileBank } from "./chainer/file_bank";
-import { IStaking } from "./chainer/IStaking";
-import { ISystem } from "./chainer/ISystem";
-import { ITeeWorker } from "./chainer/tee_worker";
-import { ICessTreasury } from "./chainer/cess_treasury";
-import { IStorageHandler } from "./chainer/storage_handler";
-import { ISession } from "./chainer/ISession";
-import { ISminer } from "./chainer/ISminer";
 import { KeyringPair } from "@polkadot/keyring/types";
+import { ApiPromise } from '@polkadot/api';
+import { IAudit, IBalances, ICessTreasury, IFileBank, IOss, ISession, ISminer, IStaking, IStorageHandler, ISystem, ITeeWorker } from "@/chainer";
 
 /**
  * CESS client interface

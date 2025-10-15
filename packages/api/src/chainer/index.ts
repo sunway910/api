@@ -8,11 +8,11 @@
 export { IAudit } from "./IAudit";
 export { IBalances } from "./IBalances";
 export { IOss } from "./IOss";
-export { IFileBank } from "./file_bank";
+export { IFileBank } from "./IFileBank";
 export { IStaking } from "./IStaking";
 export { ISystem } from "./ISystem";
-export { ITeeWorker } from "./tee_worker";
-export { ICessTreasury } from "./cess_treasury";
-export { IStorageHandler } from "./storage_handler";
+export { ITeeWorker } from "./ITeeWorker";
+export { ICessTreasury } from "./ICessTreasury";
+export { IStorageHandler } from "./IStorageHandler";
 export { ISession } from "./ISession";
 export { ISminer } from "./ISminer";

@@ -79,7 +79,7 @@ main().catch(console.error);
 
 ## Documentation
 
-For more detailed documentation, please visit [CESS official documentation](https://doc.cess.network/developer/cess-sdk/javascript-sdk).
+For more detailed documentation, please visit [CESS official documentation](https://doc.cess.network/developer/cess-sdk/sdk-js).
 
 ## License
 

@@ -19,6 +19,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsc-alias",
+    "dev": "tsc -p tsconfig.json --watch",
     "prepublishOnly": "npm run build",
     "clean": "rimraf dist"
   },

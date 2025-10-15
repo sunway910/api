@@ -1,36 +1,37 @@
 import { DownloadOptions, FetchDataOptions, GatewayConfig, QueryDataOptions, UploadResponse } from "@cessnetwork/types";
 import fs from "fs";
 import path from "path";
-import { pipeline } from "stream/promises";
 import { Readable } from "stream";
+import { pipeline } from "stream/promises";
+import { verifyUploadConfig } from "@/utils";
 
+// Extended download options with additional configuration
 export interface ExtendedDownloadOptions extends DownloadOptions {
     savePath?: string; // Optional path to save the file
     createDirectories?: boolean; // Whether to create directories if they don't exist
     overwrite?: boolean; // Whether to overwrite existing files
-    // Range request support
     range?: {
-        start: number;
-        end?: number;
+        start: number; // Start byte for range request
+        end?: number;   // End byte for range request (optional)
     };
-    // Encryption support (matching server's capsule/rkb/pkx headers)
     encryption?: {
-        capsule: string;
-        rkb: string;
-        pkx: string;
+        capsule: string; // Encryption capsule
+        rkb: string;     // Re-encryption key bytes
+        pkx: string;     // Public key X
     };
 }
 
+// Interface for download result with extended data
 export interface DownloadResult extends UploadResponse {
     data?: {
-        content?: ArrayBuffer;
-        contentType?: string | null;
-        contentLength?: string | null;
-        contentRange?: string | null; // For range requests
-        filePath?: string; // Path where file was saved
-        fileName?: string; // Name of the saved file
-        fileSize?: number; // Size of the downloaded file
-        isPartialContent?: boolean; // Whether this is a partial download
+        content?: ArrayBuffer;        // The downloaded content as array buffer
+        contentType?: string | null;  // Content type of the downloaded file
+        contentLength?: string | null; // Length of the downloaded content
+        contentRange?: string | null;  // Range information for partial downloads
+        filePath?: string;            // Path where file was saved (if saved to disk)
+        fileName?: string;            // Name of the saved file
+        fileSize?: number;            // Size of the downloaded file in bytes
+        isPartialContent?: boolean;   // Whether this is a partial download (status 206)
     };
 }
 
@@ -41,12 +42,19 @@ export const RETRIEVER_FETCHDATA_URL = "/cache-fetch";
 
 /**
  * Download file from gateway with optional save to disk
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param options - Extended download options including FID, segment hash, save path, etc.
+ * @param onProgress - Optional callback for download progress tracking
+ * @returns Promise containing the download result with success status and data
  */
 export async function downloadFile(
     config: GatewayConfig,
     options: ExtendedDownloadOptions,
+    onProgress?: (downloaded: number, total: number) => void
 ): Promise<DownloadResult> {
     const baseUrl = config.baseUrl.replace(/\/$/, "");
+
     try {
         let url: string;
         if (options.segmentHash) {
@@ -57,13 +65,11 @@ export async function downloadFile(
 
         const headers: Record<string, string> = {};
 
-        // Add Range header for partial downloads
         if (options.range) {
             const {start, end} = options.range;
             headers["Range"] = `bytes=${start}-${end || ''}`;
         }
 
-        // Add encryption headers if provided
         if (options.encryption) {
             headers["Capsule"] = options.encryption.capsule;
             headers["Rkb"] = options.encryption.rkb;
@@ -77,26 +83,17 @@ export async function downloadFile(
 
         // Check if request was successful
         if (!response.ok) {
-            // Try to parse error response
-            try {
-                const errorData = await response.json();
-                return {
-                    success: false,
-                    status: response.status,
-                    error: `HTTP ${response.status}: ${response.statusText}`,
-                };
-            } catch {
-                return {
-                    success: false,
-                    status: response.status,
-                    error: `HTTP ${response.status}: ${response.statusText}`,
-                };
-            }
+            return {
+                success: false,
+                status: response.status,
+                error: `HTTP ${response.status}: ${response.statusText}`,
+            };
         }
 
         const contentType = response.headers.get("content-type");
         const contentLength = response.headers.get("content-length");
         const contentRange = response.headers.get("content-range");
+        const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
         const isPartialContent = response.status === 206;
 
         // Extract filename from Content-Disposition header if available
@@ -109,35 +106,60 @@ export async function downloadFile(
             }
         }
 
-        // If savePath is provided, save to disk
+        // Determine whether to use progress tracking
+        const useProgressTracking = !!onProgress;
+
         if (options.savePath) {
-            const saveResult = await saveResponseToFile(response, options, serverFileName);
-            return {
-                success: true,
-                data: {
-                    contentType,
-                    contentLength,
-                    contentRange,
-                    isPartialContent,
-                    filePath: saveResult.filePath,
-                    fileName: saveResult.fileName,
-                    fileSize: saveResult.fileSize,
-                },
-            };
+            // Save to file
+            if (useProgressTracking) {
+                // Save with progress tracking
+                return await saveToFileWithProgress(
+                    response,
+                    options,
+                    serverFileName,
+                    totalSize,
+                    onProgress,
+                    {contentType, contentLength, contentRange, isPartialContent}
+                );
+            } else {
+                // Save without progress tracking
+                const saveResult = await saveResponseToFile(response, options, serverFileName);
+                return {
+                    success: true,
+                    data: {
+                        contentType,
+                        contentLength,
+                        contentRange,
+                        isPartialContent,
+                        filePath: saveResult.filePath,
+                        fileName: saveResult.fileName,
+                        fileSize: saveResult.fileSize,
+                    },
+                };
+            }
         } else {
-            // Return as ArrayBuffer for in-memory use
-            const data = await response.arrayBuffer();
-            return {
-                success: true,
-                data: {
-                    content: data,
-                    contentType,
-                    contentLength,
-                    contentRange,
-                    isPartialContent,
-                    fileSize: data.byteLength,
-                },
-            };
+            if (useProgressTracking) {
+                // Read with progress tracking
+                return await readToBufferWithProgress(
+                    response,
+                    totalSize,
+                    onProgress,
+                    {contentType, contentLength, contentRange, isPartialContent}
+                );
+            } else {
+                const data = await response.arrayBuffer();
+                return {
+                    success: true,
+                    data: {
+                        content: data,
+                        contentType,
+                        contentLength,
+                        contentRange,
+                        isPartialContent,
+                        fileSize: data.byteLength,
+                    },
+                };
+            }
         }
     } catch (error) {
         return {
@@ -148,7 +170,137 @@ export async function downloadFile(
 }
 
 /**
+ * Helper function for saving response to file with progress tracking
+ * 
+ * @param response - The fetch response object containing the file data
+ * @param options - Extended download options
+ * @param serverFileName - Optional filename from server's Content-Disposition header
+ * @param totalSize - Total size of the download in bytes
+ * @param onProgress - Callback for progress tracking
+ * @param responseHeaders - Headers from the response (content-type, content-length, etc.)
+ * @returns Promise containing the download result
+ */
+async function saveToFileWithProgress(
+    response: Response,
+    options: ExtendedDownloadOptions,
+    serverFileName: string | undefined,
+    totalSize: number,
+    onProgress: (downloaded: number, total: number) => void,
+    responseHeaders: {
+        contentType: string | null;
+        contentLength: string | null;
+        contentRange: string | null;
+        isPartialContent: boolean;
+    }
+): Promise<DownloadResult> {
+    const {filePath, fileName} = await prepareSavePath(
+        options.savePath!,
+        options.fid,
+        responseHeaders.contentType,
+        options.createDirectories,
+        options.overwrite,
+        serverFileName
+    );
+
+    const readable = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
+    const writeStream = fs.createWriteStream(filePath);
+
+    let downloadedSize = 0;
+
+    // Track progress
+    readable.on('data', (chunk: Buffer) => {
+        downloadedSize += chunk.length;
+        if (totalSize > 0) {
+            onProgress(downloadedSize, totalSize);
+        }
+    });
+
+    await pipeline(readable, writeStream);
+
+    const stats = await fs.promises.stat(filePath);
+
+    return {
+        success: true,
+        data: {
+            contentType: responseHeaders.contentType,
+            contentLength: responseHeaders.contentLength,
+            contentRange: responseHeaders.contentRange,
+            isPartialContent: responseHeaders.isPartialContent,
+            filePath,
+            fileName,
+            fileSize: stats.size,
+        },
+    };
+}
+
+/**
+ * Helper function for reading response to buffer with progress tracking
+ * 
+ * @param response - The fetch response object containing the file data
+ * @param totalSize - Total size of the download in bytes
+ * @param onProgress - Callback for progress tracking
+ * @param responseHeaders - Headers from the response (content-type, content-length, etc.)
+ * @returns Promise containing the download result with the content as ArrayBuffer
+ */
+async function readToBufferWithProgress(
+    response: Response,
+    totalSize: number,
+    onProgress: (downloaded: number, total: number) => void,
+    responseHeaders: {
+        contentType: string | null;
+        contentLength: string | null;
+        contentRange: string | null;
+        isPartialContent: boolean;
+    }
+): Promise<DownloadResult> {
+    const chunks: Uint8Array[] = [];
+    const reader = response.body?.getReader();
+
+    if (!reader) {
+        throw new Error("Response body is not readable");
+    }
+
+    let downloadedSize = 0;
+
+    while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+
+        chunks.push(value);
+        downloadedSize += value.length;
+
+        if (totalSize > 0) {
+            onProgress(downloadedSize, totalSize);
+        }
+    }
+
+    const buffer = new Uint8Array(downloadedSize);
+    let offset = 0;
+    for (const chunk of chunks) {
+        buffer.set(chunk, offset);
+        offset += chunk.length;
+    }
+
+    return {
+        success: true,
+        data: {
+            content: buffer.buffer,
+            contentType: responseHeaders.contentType,
+            contentLength: responseHeaders.contentLength,
+            contentRange: responseHeaders.contentRange,
+            isPartialContent: responseHeaders.isPartialContent,
+            fileSize: downloadedSize,
+        },
+    };
+}
+
+/**
  * Save response stream to file
+ * 
+ * @param response - The fetch response object containing the file data
+ * @param options - Extended download options including save path
+ * @param serverFileName - Optional filename from server's Content-Disposition header
+ * @returns Promise containing file path, name and size information
  */
 async function saveResponseToFile(
     response: Response,
@@ -186,7 +338,12 @@ async function saveResponseToFile(
 }
 
 /**
- * Generate filename from fid and content type
+ * Generate filename from FID and content type
+ * 
+ * @param fid - File identifier to use in the filename
+ * @param contentType - MIME content type of the file
+ * @param serverFileName - Optional filename provided by the server
+ * @returns Generated filename with appropriate extension
  */
 function generateFileName(fid: string, contentType: string | null, serverFileName?: string): string {
     // Use server-provided filename if available
@@ -202,6 +359,9 @@ function generateFileName(fid: string, contentType: string | null, serverFileNam
 
 /**
  * Get file extension from content type
+ * 
+ * @param contentType - MIME content type string
+ * @returns File extension corresponding to the content type
  */
 function getExtensionFromContentType(contentType: string | null): string {
     if (!contentType) return '.bin';
@@ -240,6 +400,9 @@ function getExtensionFromContentType(contentType: string | null): string {
 
 /**
  * Check if file exists
+ * 
+ * @param filePath - Path to check for file existence
+ * @returns Promise resolving to true if file exists, false otherwise
  */
 async function fileExists(filePath: string): Promise<boolean> {
     try {
@@ -250,6 +413,18 @@ async function fileExists(filePath: string): Promise<boolean> {
     }
 }
 
+/**
+ * Prepare save path for downloaded file
+ * 
+ * @param savePath - The path where the file should be saved
+ * @param fid - File identifier to use in filename if needed
+ * @param contentType - Content type to determine file extension
+ * @param createDirectories - Whether to create directories if they don't exist
+ * @param overwrite - Whether to overwrite existing files
+ * @param serverFileName - Optional filename provided by the server
+ * @returns Promise containing the prepared file path and filename
+ * @throws Error if file already exists and overwrite is false
+ */
 async function prepareSavePath(
     savePath: string,
     fid: string,
@@ -284,42 +459,12 @@ async function prepareSavePath(
 }
 
 /**
- * Download file with range request support (useful for resuming downloads)
- */
-export async function downloadFileRange(
-    config: GatewayConfig,
-    options: ExtendedDownloadOptions,
-    start: number,
-    end?: number
-): Promise<DownloadResult> {
-    const rangeOptions: ExtendedDownloadOptions = {
-        ...options,
-        range: {start, end},
-    };
-    return downloadFile(config, rangeOptions);
-}
-
-/**
- * Download encrypted file
- */
-export async function downloadEncryptedFile(
-    config: GatewayConfig,
-    options: ExtendedDownloadOptions,
-    encryptionData: {
-        capsule: string;
-        rkb: string;
-        pkx: string;
-    }
-): Promise<DownloadResult> {
-    const encryptedOptions: ExtendedDownloadOptions = {
-        ...options,
-        encryption: encryptionData,
-    };
-    return downloadFile(config, encryptedOptions);
-}
-
-/**
  * Fetch file metadata without downloading content
+ * Uses HTTP HEAD request to get file information
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param options - Download options including FID
+ * @returns Promise containing the metadata response with success status and data
  */
 export async function getFileMetadata(
     config: GatewayConfig,
@@ -368,170 +513,15 @@ export async function getFileMetadata(
     }
 }
 
-/**
- * Download file with progress tracking and support for range requests
- */
-export async function downloadFileWithProgress(
-    config: GatewayConfig,
-    options: ExtendedDownloadOptions,
-    onProgress?: (downloaded: number, total: number) => void
-): Promise<DownloadResult> {
-    const baseUrl = config.baseUrl.replace(/\/$/, "");
-    try {
-        // Build URL path according to Gin routing
-        let url: string;
-        if (options.segmentHash) {
-            url = `${baseUrl}${GATEWAY_GETFILE_URL}/${options.fid}/${options.segmentHash}`;
-        } else {
-            url = `${baseUrl}${GATEWAY_GETFILE_URL}/${options.fid}`;
-        }
-
-        const headers: Record<string, string> = {};
-
-        // Add Range header if specified
-        if (options.range) {
-            const {start, end} = options.range;
-            headers["Range"] = `bytes=${start}-${end || ''}`;
-        }
-
-        // Add encryption headers if provided
-        if (options.encryption) {
-            headers["Capsule"] = options.encryption.capsule;
-            headers["Rkb"] = options.encryption.rkb;
-            headers["Pkx"] = options.encryption.pkx;
-        }
-
-        const response = await fetch(url, {
-            method: "GET",
-            headers,
-        });
-
-        if (!response.ok) {
-            try {
-                const errorData = await response.json();
-                return {
-                    success: false,
-                    status: response.status,
-                    error: `HTTP ${response.status}: ${response.statusText}`,
-                };
-            } catch {
-                return {
-                    success: false,
-                    status: response.status,
-                    error: `HTTP ${response.status}: ${response.statusText}`,
-                };
-            }
-        }
-
-        const contentType = response.headers.get("content-type");
-        const contentLength = response.headers.get("content-length");
-        const contentRange = response.headers.get("content-range");
-        const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
-        const isPartialContent = response.status === 206;
-
-        // Extract filename from Content-Disposition header if available
-        const contentDisposition = response.headers.get("content-disposition");
-        let serverFileName: string | undefined;
-        if (contentDisposition) {
-            const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-            if (filenameMatch) {
-                serverFileName = filenameMatch[1].replace(/['"]/g, '');
-            }
-        }
-
-        let downloadedSize = 0;
-
-        if (options.savePath) {
-            // Save to file with progress tracking
-            const {filePath, fileName} = await prepareSavePath(
-                options.savePath,
-                options.fid,
-                contentType,
-                options.createDirectories,
-                options.overwrite,
-                serverFileName
-            );
-
-            const readable = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
-            const writeStream = fs.createWriteStream(filePath);
-
-            // Track progress
-            readable.on('data', (chunk: Buffer) => {
-                downloadedSize += chunk.length;
-                if (onProgress && totalSize > 0) {
-                    onProgress(downloadedSize, totalSize);
-                }
-            });
-
-            await pipeline(readable, writeStream);
-
-            const stats = await fs.promises.stat(filePath);
-
-            return {
-                success: true,
-                data: {
-                    contentType,
-                    contentLength,
-                    contentRange,
-                    isPartialContent,
-                    filePath,
-                    fileName,
-                    fileSize: stats.size,
-                },
-            };
-        } else {
-            // Return as ArrayBuffer with progress tracking
-            const chunks: Uint8Array[] = [];
-            const reader = response.body?.getReader();
-
-            if (!reader) {
-                throw new Error("Response body is not readable");
-            }
-
-            while (true) {
-                const {done, value} = await reader.read();
-                if (done) break;
-
-                chunks.push(value);
-                downloadedSize += value.length;
-
-                if (onProgress && totalSize > 0) {
-                    onProgress(downloadedSize, totalSize);
-                }
-            }
-
-            const buffer = new Uint8Array(downloadedSize);
-            let offset = 0;
-            for (const chunk of chunks) {
-                buffer.set(chunk, offset);
-                offset += chunk.length;
-            }
-
-            return {
-                success: true,
-                data: {
-                    content: buffer.buffer,
-                    contentType,
-                    contentLength,
-                    contentRange,
-                    isPartialContent,
-                    fileSize: downloadedSize,
-                },
-            };
-        }
-    } catch (error) {
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error occurred",
-        };
-    }
-}
-
 // Keep your existing functions for queryData, fetchCacheData, downloadFiles, etc.
 // They don't need changes since they don't interact with the download endpoint
 
 /**
  * Query data from retriever
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param options - Query options with hash parameter
+ * @returns Promise containing the query result with success status and data
  */
 export async function queryData(
     config: GatewayConfig,
@@ -550,7 +540,7 @@ export async function queryData(
         const response = await fetch(url, {
             method: "GET",
             headers: {
-                "Token": config.token,
+                "Token": config.token!,
             },
         });
         const result = await response.json();
@@ -568,6 +558,10 @@ export async function queryData(
 
 /**
  * Fetch data from cache
+ * 
+ * @param config - Gateway configuration including base URL and authentication token
+ * @param options - Fetch options with cache key
+ * @returns Promise containing the cached data with success status and data
  */
 export async function fetchCacheData(
     config: GatewayConfig,
@@ -575,6 +569,7 @@ export async function fetchCacheData(
 ): Promise<UploadResponse> {
     const baseUrl = config.baseUrl.replace(/\/$/, "");
     try {
+        verifyUploadConfig(config);
         const params = new URLSearchParams();
         params.append("cacheKey", options.cacheKey);
 
@@ -583,7 +578,7 @@ export async function fetchCacheData(
         const response = await fetch(url, {
             method: "GET",
             headers: {
-                "Token": config.token,
+                "Token": config.token!,
             },
         });
 
@@ -599,5 +594,3 @@ export async function fetchCacheData(
         };
     }
 }
-
-// Add batch download functions here if needed...

@@ -1,23 +1,14 @@
-import { getMnemonic } from "@/test/config";
-import { FileMetadata, GatewayConfig, OssAuthorityList, OssDetail, StorageOrder, Territory } from "@cessnetwork/types";
-import * as console from "node:console";
-import { u8aToHex } from "@polkadot/util";
-import { createHash } from 'crypto';
 import { CESS } from "@/cess";
-import { downloadFile, ExtendedDownloadOptions, getToken, SDKError, uploadFile } from "@/utils";
+import { getMnemonic } from "@/test/config";
+import { downloadFile, ExtendedDownloadOptions, GenGatewayAccessToken, SDKError, upload } from "@/utils";
+import { FileMetadata, GatewayConfig, OssAuthorityList, OssDetail, StorageOrder, Territory } from "@cessnetwork/types";
 import { safeSignUnixTime } from "@cessnetwork/util";
-
-function calculateSHA256Hash(data: string): Buffer {
-    const hash = createHash('sha256');
-    hash.update(data);
-    return hash.digest();
-}
-
+import { u8aToHex } from "@polkadot/util";
 
 async function main() {
     const config = {
         name: "CESS-Pre-MainNet",
-        rpcs: ["wss://pm-rpc.cess.network/ws/"],
+        rpcs: ["wss://pm-rpc.cess.network"],
         privateKey: getMnemonic(),
         ss58Format: 11330,
         enableEventListener: false,
@@ -44,6 +35,8 @@ async function main() {
         let territoryToken
         const myTerritory = "default"
         const territory = await cess.queryTerritory(accountAddress, myTerritory) as Territory;
+        const curBlockHeight = await cess.queryBlockNumberByHash()
+        console.log('Current Block Height:', curBlockHeight);
 
         if (!territory) {
             try {
@@ -70,20 +63,34 @@ async function main() {
             } catch (error) {
                 console.error('❌ Error during territory minting:', error);
             }
+        } else if (territory.deadline - curBlockHeight <= 100800) {
+            // 100800 block means 7 days
+            const renewalRes = await cess.renewalTerritory(myTerritory, 10)
+            console.log('renew territory successfully:', renewalRes.blockHash);
+        } else if (territory.state != "Active" || curBlockHeight >= territory.deadline) {
+            // data will be reset when re-activate territory
+            const reactivateRes = await cess.reactivateTerritory(myTerritory, 30)
+            console.log('reactivate territory successfully:', reactivateRes.blockHash);
+        } else if (territory.remainingSpace <= 1024 * 1024 * 1024) {
+            // remaining space <= 1GiB
+            const expandRes = await cess.expandingTerritory(myTerritory, 1)
+            console.log('expand territory successfully:', expandRes.blockHash);
         } else {
             console.log("territory exist: ", territory)
         }
 
         // step3: auth to gateway acc if not auth
-
-        // get gateway acc
         let gatewayAcc = ""
+        // get oss public acc by domain name
         const ossAccList = await cess.queryOssByAccountId() as unknown as OssDetail[]
         for (let i = 0; i < ossAccList.length; i++) {
             if (ossAccList[i].ossInfo.domain == gatewayUrl) {
                 gatewayAcc = ossAccList[i].account
                 break;
             }
+        }
+        if (!gatewayAcc) {
+            throw new Error("gateway not found")
         }
 
         // auth my territory to gateway acc
@@ -106,7 +113,7 @@ async function main() {
         }
 
         // step4: get token from gateway
-        const token = await getToken("http://154.194.34.195:1306", {
+        const token = await GenGatewayAccessToken("http://154.194.34.195:1306", {
             account: accountAddress,
             message: sign_message,
             sign: u8aToHex(signature),
@@ -121,19 +128,19 @@ async function main() {
 
         let uploadResult = {} as any
         let fid = ""
-        uploadResult = await uploadFile(gatewayConfig, "./src/utils/gateway/a.txt", {territory: myTerritory});
-
-        if (uploadResult.code == 200) {
-            fid = uploadResult.data
-            console.log("fid: ", fid)
-        } else {
-            throw new Error("Failed to upload file")
-        }
+        uploadResult = await upload(gatewayConfig, "./src/test/gateway/demo.txt", {
+            territory: myTerritory,
+            uploadFileWithProgress: (progress) => {
+                console.log(`\rUpload progress: ${progress.percentage}% (${progress.loaded}/${progress.total} bytes) - ${progress.file}`);
+            }
+        });
+        fid = uploadResult.data
+        console.log("upload result: ", uploadResult)
 
         // step6: download file from gateway
         const downloadOptions: ExtendedDownloadOptions = {
             fid: fid,
-            savePath: "./src/utils/gateway/b.txt",
+            savePath: "./src/test/gateway/download.txt",
             overwrite: true,
             createDirectories: true,
         };
@@ -143,7 +150,6 @@ async function main() {
         } else {
             throw new Error("Failed to download file")
         }
-        console.log("download result:", downloadResult)
 
         // step7: query file
         // If the return value is not null, it means that the data is being distributed to storage miners.
@@ -156,8 +162,6 @@ async function main() {
             const fileMeta = await cess.queryFileByFid(fid) as unknown as FileMetadata
             console.log("file meta data: ", fileMeta)
         }
-
-
     } catch (error) {
 
     } finally {

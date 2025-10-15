@@ -24,8 +24,10 @@ export interface IStorageHandler {
 
     expandingTerritory(territoryName: string, gibCount: Space, options?: TransactionOptions): Promise<TransactionResult>;
 
+    // call this func before territory expired
     renewalTerritory(territoryName: string, daysCount: Day, options?: TransactionOptions): Promise<TransactionResult>;
 
+    // call this func after territory expired, but data will be reset
     reactivateTerritory(territoryName: string, daysCount: Day, options?: TransactionOptions): Promise<TransactionResult>;
 
     territoryConsignment(territoryName: string, price: Price, options?: TransactionOptions): Promise<TransactionResult>;
