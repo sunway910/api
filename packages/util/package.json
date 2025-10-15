@@ -1,6 +1,6 @@
 {
   "name": "@cessnetwork/util",
-  "version": "0.0.9",
+  "version": "0.1.0",
   "description": "Utility functions for CESS SDK",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -39,7 +39,7 @@
   "homepage": "https://github.com/CESSProject/api#readme",
   "dependencies": {
     "@bnb-chain/reed-solomon": "^1.1.4",
-    "@cessnetwork/types": "^0.0.13",
+    "@cessnetwork/types": "^0.1.0",
     "@polkadot/keyring": "13.5.6",
     "@polkadot/util": "13.5.6",
     "@polkadot/util-crypto": "13.5.6",
