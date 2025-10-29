@@ -43,9 +43,7 @@
     "@polkadot/keyring": "13.5.6",
     "@polkadot/util": "13.5.6",
     "@polkadot/util-crypto": "13.5.6",
-    "form-data": "^4.0.4",
-    "merkletreejs": "^0.3.10",
-    "ping": "^0.4.4"
+    "merkletreejs": "^0.3.10"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",
