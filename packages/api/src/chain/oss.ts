@@ -27,6 +27,14 @@ export function Oss<TBase extends Constructor<ChainBase>>(Base: TBase) {
             return oss.queryAuthorityListByAccountId(this.api, accountId, block);
         }
 
+
+        async queryOssAccByDomain(domain: string): Promise<string> {
+            if (!isApiReady(this.api)) {
+                throw new SDKError('API Client is not ready', 'INVALID_API_CLIENT');
+            }
+            return oss.queryOssAccByDomain(this.api, domain);
+        }
+
         authorize(accountId: AccountIdInput, options?: TransactionOptions): Promise<TransactionResult> {
             if (!isApiReady(this.api)) {
                 throw new SDKError('API Client is not ready', 'INVALID_API_CLIENT');

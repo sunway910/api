@@ -6,6 +6,7 @@ export interface OssInfo {
      * Domain URL which can be connected to the OSS
      * Note: peerId field is deprecated
      */
+    peerId: string;
     domain: string;
 }
 

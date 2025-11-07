@@ -31,9 +31,15 @@
     "test": "pnpm --recursive run test",
     "test:api": "pnpm --filter @cessnetwork/api run test",
     "clean": "pnpm --recursive run clean",
-    "publish:all": "pnpm --recursive publish"
+    "publish:all": "pnpm --recursive publish",
+    "changeset:autogenerate": "node .changesets/changesets-autogenerate.mjs",
+    "release": "pnpm changeset version && pnpm changeset publish"
   },
   "resolutions": {
     "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "@changesets/changelog-github": "^0.5.1",
+    "@changesets/cli": "^2.29.7"
   }
 }

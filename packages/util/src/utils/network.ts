@@ -1,5 +1,4 @@
 import * as net from 'net';
-import * as ping from 'ping';
 
 const IPV4_REGEX = /\d+\.\d+\.\d+\.\d+/;
 
@@ -53,9 +52,4 @@ export function checkDomain(name: string): void {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9](?:\.[a-zA-Z]{2,})+$/.test(domain)) {
         throw new Error('Invalid domain name');
     }
-}
-
-export async function pingNode(addr: string): Promise<number> {
-    const res = await ping.promise.probe(addr);
-    return res.avg ? parseFloat(res.avg) : 0;
 }
