@@ -19,7 +19,7 @@ async function main() {
         console.log('Connected to network:', cess.getNetworkEnv());
         console.log('Account private key:', getMnemonic());
         console.log('Account address:', accountAddress);
-        const gatewayUrl = "http://154.194.34.195:1306"
+        const gatewayUrl = "https://gateway1.cess.network"
 
         // step1: sign message
         if (!cess.keyring) {
@@ -90,7 +90,7 @@ async function main() {
             }
         }
         if (!gatewayAcc) {
-            throw new Error("gateway not found")
+            console.error("gateway not found")
         }
 
         // auth my territory to gateway acc
@@ -113,7 +113,7 @@ async function main() {
         }
 
         // step4: get token from gateway
-        const token = await GenGatewayAccessToken("http://154.194.34.195:1306", {
+        const token = await GenGatewayAccessToken("https://gateway1.cess.network", {
             account: accountAddress,
             message: sign_message,
             sign: u8aToHex(signature),
@@ -122,7 +122,7 @@ async function main() {
 
         // step5: upload file to gateway
         const gatewayConfig: GatewayConfig = {
-            baseUrl: process.env.CESS_GATEWAY_URL || "http://154.194.34.195:1306",
+            baseUrl: process.env.CESS_GATEWAY_URL || "https://gateway1.cess.network",
             token: process.env.CESS_GATEWAY_TOKEN || token
         };
 
@@ -151,8 +151,8 @@ async function main() {
             throw new Error("Failed to download file")
         }
 
-        // step7: query file
-        // If the return value is not null, it means that the data is being distributed to storage miners.
+        // step7: query file after a while (gateway is creating storage order)
+        // If the queryDealMap func return value is not null, it means that the data is being distributed to storage miners.
         // otherwise it means that the data has been stored on the storage node
         const dealMap = await cess.queryDealMap(fid) as unknown as StorageOrder
         if (dealMap) {
