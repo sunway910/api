@@ -4,6 +4,7 @@ import { TransactionOptions, TransactionResult } from "@/utils/tx";
 export interface IOss {
     queryOssByAccountId(accountId?: AccountIdInput, block?: BlockNumberInput): Promise<OssInfo | OssDetail[] | null>;
     queryAuthorityListByAccountId(accountId?: AccountIdInput, block?: BlockNumberInput): Promise<string[] | OssAuthorityList[]>;
+    queryOssAccByDomain(domain: string): Promise<string>;
 
     authorize(accountId: AccountIdInput, options?: TransactionOptions): Promise<TransactionResult>;
     proxyAuthorize(authPub: AccountIdInput, sig: Uint8Array | EIP712Signature | string, payload: OssProxyAuthPayload, options?: TransactionOptions): Promise<TransactionResult>;

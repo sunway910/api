@@ -83,6 +83,26 @@ export async function queryAuthorityListByAccountId(
     }
 }
 
+export async function queryOssAccByDomain(
+    api: ApiPromise,
+    domain: string,
+): Promise<string> {
+    if (new URL(domain)) {
+        throw new SDKError(
+            'invalid domain format',
+            'INVALID_PARAMETERS'
+        );
+    } else {
+        const ossAccList = await queryOssByAccountId(api) as unknown as OssDetail[]
+        for (let i = 0; i < ossAccList.length; i++) {
+            if (ossAccList[i].ossInfo.domain == domain) {
+                return ossAccList[i].account
+            }
+        }
+        return "";
+    }
+}
+
 export async function authorize(
     api: ApiPromise,
     keyring: KeyringPair,
