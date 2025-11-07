@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { SDKError } from "@/utils";
+import { isValidUrl, SDKError } from "@/utils";
 import { calculatePaymentInfo, executeTransaction, normalizeTransactionOptions, TransactionOptions, TransactionResult } from "@/utils/tx";
 import { ApiPromise } from '@polkadot/api';
 import { KeyringPair } from "@polkadot/keyring/types";
@@ -29,7 +29,7 @@ export async function queryOssByAccountId(
         const ossData = result.toJSON() as any;
 
         return {
-            // peerId: ossData.peerId.toString(),
+            peerId: ossData.peerId.toString(),
             domain: hexToString(ossData.domain)
         } as OssInfo;
     } else {
@@ -40,7 +40,7 @@ export async function queryOssByAccountId(
             return {
                 account: key.args[0].toString(),
                 ossInfo: {
-                    // peerId: ossData.peerId.toString(),
+                    peerId: ossData.peerId.toString(),
                     domain: hexToString(ossData.domain)
                 } as OssInfo
             } as OssDetail;
@@ -87,7 +87,7 @@ export async function queryOssAccByDomain(
     api: ApiPromise,
     domain: string,
 ): Promise<string> {
-    if (new URL(domain)) {
+    if (!isValidUrl(domain)) {
         throw new SDKError(
             'invalid domain format',
             'INVALID_PARAMETERS'

@@ -466,3 +466,101 @@ function createStatusCallback(
         }
     };
 }
+
+/**
+ * Nonce Manager - Singleton pattern for managing nonce conflicts
+ * Maintains a queue of pending transactions per account
+ */
+export class NonceManager {
+    private static instance: NonceManager;
+    private nonceQueues: Map<string, number> = new Map();
+    private pendingTxs: Map<string, Set<number>> = new Map();
+    private locks: Map<string, Promise<void>> = new Map();
+
+    private constructor() {}
+
+    static getInstance(): NonceManager {
+        if (!NonceManager.instance) {
+            NonceManager.instance = new NonceManager();
+        }
+        return NonceManager.instance;
+    }
+
+    /**
+     * Get next available nonce for an account
+     * Ensures sequential nonce allocation even in concurrent scenarios
+     */
+    async getNextNonce(
+        account: string,
+        getCurrentNonceFn: () => Promise<number>
+    ): Promise<number> {
+        // Wait for any pending lock on this account
+        while (this.locks.has(account)) {
+            await this.locks.get(account);
+        }
+
+        // Create a new lock for this account
+        let releaseLock: () => void;
+        const lockPromise = new Promise<void>((resolve) => {
+            releaseLock = resolve;
+        });
+        this.locks.set(account, lockPromise);
+
+        try {
+            // Get current nonce from chain if not cached
+            if (!this.nonceQueues.has(account)) {
+                const chainNonce = await getCurrentNonceFn();
+                this.nonceQueues.set(account, chainNonce);
+                this.pendingTxs.set(account, new Set());
+            }
+
+            const nextNonce = this.nonceQueues.get(account)!;
+
+            // Increment nonce for next transaction
+            this.nonceQueues.set(account, nextNonce + 1);
+
+            // Track this nonce as pending
+            this.pendingTxs.get(account)!.add(nextNonce);
+
+            return nextNonce;
+        } finally {
+            // Release the lock
+            this.locks.delete(account);
+            releaseLock!();
+        }
+    }
+
+    /**
+     * Mark transaction as completed (success or failure)
+     * Clean up tracking data
+     */
+    releaseNonce(account: string, nonce: number): void {
+        const pending = this.pendingTxs.get(account);
+        if (pending) {
+            pending.delete(nonce);
+
+            // If all transactions completed, reset cache
+            if (pending.size === 0) {
+                this.nonceQueues.delete(account);
+                this.pendingTxs.delete(account);
+            }
+        }
+    }
+
+    /**
+     * Reset nonce cache for an account
+     * Useful when transaction fails and needs retry
+     */
+    resetAccount(account: string): void {
+        this.nonceQueues.delete(account);
+        this.pendingTxs.delete(account);
+    }
+
+    /**
+     * Clear all cached data
+     */
+    clear(): void {
+        this.nonceQueues.clear();
+        this.pendingTxs.clear();
+    }
+}

@@ -1,14 +1,18 @@
-import { GatewayConfig, GenTokenReq, UploadOptions } from "@cessnetwork/types";
+import { GatewayConfig, GenTokenReq, OssDetail, UploadOptions } from "@cessnetwork/types";
 import { Keyring } from "@polkadot/api";
-import { u8aConcat } from "@polkadot/util";
-import { blake2AsU8a, cryptoWaitReady, mnemonicValidate, randomAsU8a } from "@polkadot/util-crypto";
+import { u8aConcat, u8aToHex } from "@polkadot/util";
+import { base58Decode, blake2AsU8a, cryptoWaitReady, mnemonicValidate, randomAsU8a } from "@polkadot/util-crypto";
+import { CESS } from "@/cess";
+import { NonceManager } from "@/utils";
 
 // Gateway endpoint for generating access tokens
 export const GATEWAY_GENTOKEN_URL = "/gateway/gentoken"
+export const GATEWAY_STATUS_URL = "/status"
+
 
 /**
  * Verify gateway configuration has required fields
- * 
+ *
  * @param config - Gateway configuration to verify
  * @throws Error if configuration is invalid
  */
@@ -23,7 +27,7 @@ export function verifyUploadConfig(config: GatewayConfig) {
 
 /**
  * Verify upload options have required fields
- * 
+ *
  * @param options - Upload options to verify
  * @throws Error if options are invalid
  */
@@ -35,7 +39,7 @@ export function verifyUploadOptions(options: UploadOptions) {
 
 /**
  * Generate gateway access token using provided credentials
- * 
+ *
  * @param gatewayUrl - Base URL of the gateway service
  * @param genTokenReq - Request object containing token generation parameters
  * @returns Promise containing the generated access token
@@ -243,7 +247,7 @@ async function genReKey(
  * Simulates scalar multiplication for elliptic curve operations
  * Note: This is a simplified implementation for demonstration
  * In production, you would use proper cryptographic libraries
- * 
+ *
  * @param scalar - Scalar value for multiplication
  * @param point - Point on the elliptic curve
  * @returns Uint8Array result of scalar multiplication
@@ -256,7 +260,7 @@ function performScalarMultiplication(scalar: Uint8Array, point: Uint8Array): Uin
 /**
  * Hash input data and convert to scalar representation
  * Uses Blake2b hash function as specified in Polkadot cryptography
- * 
+ *
  * @param input - Input data to hash
  * @returns Uint8Array hash result as scalar
  */
@@ -268,7 +272,7 @@ function hashAndConvertToScalar(input: Uint8Array): Uint8Array {
 /**
  * Generate the final re-encryption key using scalar arithmetic
  * Simulates: rk = skA * d^(-1)
- * 
+ *
  * @param skA - Secret key A
  * @param d - Scalar value
  * @returns Uint8Array re-encryption key
@@ -290,4 +294,242 @@ export interface ReEncryptionKeyResult {
 export interface ReKeyGenerationResult {
     rk: Uint8Array;  // Re-encryption key
     pkX: Uint8Array; // Public key X
+}
+
+export interface OssStatus {
+    version: string;
+    work_addr: string;
+    tee_addr: string;
+    tee_pubkey: number[]; // byte array maps to number array in TypeScript
+    endpoint: string;
+    redis_addr: string;
+    poolid: string;
+    is_gateway: boolean;
+    active_storage_nodes: string[];
+    status: nodeStatus;
+}
+
+export interface nodeStatus {
+    [key: string]: any;
+}
+
+export interface CheckOssResult {
+    success: boolean;
+    data?: OssStatus;
+    error?: string;
+}
+
+/**
+ * Validate if the input string is a valid URL
+ * @param url - The URL string to validate
+ * @returns true if valid, false otherwise
+ */
+export function isValidUrl(url: string): boolean {
+    try {
+        const urlObj = new URL(url);
+        return !!urlObj;
+    } catch (error) {
+        return false;
+    }
+}
+
+/**
+ * Check OSS node status by making HTTP GET request
+ * @param url - The base URL of the OSS node
+ * @returns Promise with the check result
+ */
+export async function checkOSSNodeStatus(url: string): Promise<CheckOssResult> {
+    if (!url) {
+        return {
+            success: false,
+            error: 'Invalid input: URL must be a non-empty string',
+        };
+    }
+    const baseUrl = url.endsWith('/') ? url.slice(0, -1) : url;
+    if (!isValidUrl(baseUrl)) {
+        return {
+            success: false,
+            error: 'Invalid URL format',
+        };
+    }
+    const statusUrl = `${baseUrl}${GATEWAY_STATUS_URL}`;
+    try {
+        const response = await fetch(statusUrl, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (!response.ok) {
+            return {
+                success: false,
+                error: `HTTP error! status: ${response.status}`,
+            };
+        }
+
+        // Parse JSON response
+        const data = await response.json() as any;
+        if (!data || typeof data !== 'object') {
+            return {
+                success: false,
+                error: 'Invalid response format',
+            };
+        }
+        return {
+            success: true,
+            data: data.data,
+        };
+    } catch (error) {
+        if (error instanceof TypeError) {
+            return {
+                success: false,
+                error: `Network error: ${error.message}`,
+            };
+        }
+        if (error instanceof Error) {
+            return {
+                success: false,
+                error: `Request failed: ${error.message}`,
+            };
+        }
+        return {
+            success: false,
+            error: 'Unknown error occurred',
+        };
+    }
+}
+
+/**
+ * Authorize all OSS nodes behind a proxy service in batch
+ * When a URL is a proxy service for an OSS node pool(oss node start with the same poolName), this function can authorize all OSS nodes behind this proxy url
+ *
+ * @param url - The base URL of the OSS node proxy
+ * @param mnemonic - Private key mnemonic phrase
+ * @param rpcList - Optional RPC endpoint list, defaults to CESS testnet
+ * @returns Promise with authorization results for each node
+ * @throws Error if gateway status fetch fails or no OSS nodes are registered
+ */
+export async function batchAuthorizeGateway(
+    url: string,
+    mnemonic: string,
+    rpcList?: string[]
+): Promise<{
+    account: string;
+    domain: string;
+    success: boolean;
+    error?: string;
+}[]> {
+    if (!url?.trim()) {
+        throw new Error('Invalid input: URL must be a non-empty string');
+    }
+    if (!mnemonic?.trim()) {
+        throw new Error('Invalid input: Mnemonic must be a non-empty string');
+    }
+
+    const gatewayDetails = await checkOSSNodeStatus(url);
+    if (!gatewayDetails.success || !gatewayDetails.data?.poolid) {
+        throw new Error(`Failed to fetch gateway status from URL: ${url}. ${gatewayDetails.error || ''}`);
+    }
+
+    const {poolid} = gatewayDetails.data;
+
+    const defaultRpcs = ["wss://testnet-rpc.cess.network"];
+    const cli = await CESS.newClient({
+        rpcs: rpcList && rpcList.length > 0 ? rpcList : defaultRpcs,
+        privateKey: mnemonic
+    });
+
+    const nonceManager = NonceManager.getInstance();
+    const signerAccount = cli.getSignatureAcc();
+
+    try {
+        const ossAccList = await cli.queryOssByAccountId() as unknown as OssDetail[];
+
+        if (!ossAccList || ossAccList.length === 0) {
+            throw new Error('No OSS nodes registered on chain yet');
+        }
+
+        // Decode pool ID once for comparison
+        const decodedPoolId = u8aToHex(base58Decode(poolid));
+
+        // Filter OSS nodes that match the gateway pool ID
+        const matchingOssNodes = ossAccList.filter(
+            ossDetail => ossDetail.ossInfo?.peerId === decodedPoolId,
+        );
+
+        if (matchingOssNodes.length === 0) {
+            console.warn(`No OSS nodes found matching pool ID: ${poolid}`);
+            return [];
+        }
+
+        // TODO: The authorization process will be repeated regardless of whether authorization is granted or not
+        const authorizationPromises = matchingOssNodes.map(async (ossDetail) => {
+            const {account} = ossDetail;
+            const domain = ossDetail.ossInfo?.domain || url;
+            let allocatedNonce: number | undefined;
+
+            try {
+                // Get next nonce with lock
+                allocatedNonce = await nonceManager.getNextNonce(
+                    signerAccount,
+                    async () => await cli.queryCurrentNonce()
+                );
+
+                console.log(`Authorizing account ${account} ${domain} with nonce ${allocatedNonce}`);
+
+                // Execute authorization with explicit nonce
+                await cli.authorize(account, {
+                    nonce: allocatedNonce
+                });
+
+                // Release nonce on success
+                nonceManager.releaseNonce(signerAccount, allocatedNonce);
+
+                return {
+                    account,
+                    domain,
+                    success: true
+                };
+            } catch (error) {
+                // Release nonce on failure
+                if (allocatedNonce !== undefined) {
+                    nonceManager.releaseNonce(signerAccount, allocatedNonce);
+                }
+
+                const errorMessage = error instanceof Error
+                    ? error.message
+                    : 'Unknown authorization error';
+
+                console.error(`Authorization failed for account ${account}:`, errorMessage);
+
+                // Reset nonce cache if transaction fails to ensure fresh nonce on retry
+                if (errorMessage.includes('nonce') || errorMessage.includes('priority')) {
+                    console.warn(`Nonce conflict detected, resetting cache for ${signerAccount}`);
+                    nonceManager.resetAccount(signerAccount);
+                }
+
+                return {
+                    account,
+                    domain,
+                    success: false,
+                    error: errorMessage
+                };
+            }
+        });
+
+        const results = await Promise.all(authorizationPromises);
+
+        const successCount = results.filter(r => r.success).length;
+        const failureCount = results.length - successCount;
+        console.log(
+            `Batch authorization completed: ${successCount} succeeded, ${failureCount} failed out of ${results.length} total`
+        );
+
+        return results;
+    } finally {
+        // Clear nonce cache for this account when client closes
+        nonceManager.resetAccount(signerAccount);
+        await cli.close();
+    }
 }
