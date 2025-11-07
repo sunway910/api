@@ -1,6 +1,6 @@
 {
   "name": "@cessnetwork/api",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "CESS Chain Interface Implementation in TypeScript",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -40,7 +40,7 @@
     "url": "https://github.com/CESSNetwork/api.git"
   },
   "dependencies": {
-    "@cessnetwork/types": "^0.1.0",
+    "@cessnetwork/types": "^0.1.1",
     "@cessnetwork/util": "^0.1.0",
     "@polkadot/api": "16.4.6",
     "@polkadot/api-base": "16.4.6",
